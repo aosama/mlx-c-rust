@@ -22,8 +22,12 @@ jobs:
       SCCACHE_GHA_ENABLED: "true"
     steps:
       - uses: actions/checkout@v7
-      - name: Install libclang for bindgen
-        run: sudo apt-get update && sudo apt-get install -y libclang-dev
+      - name: Install libclang and the C headers for bindgen
+        # bindgen only parses the vendored headers, but its clang still pulls in
+        # the host <stdint.h>, which needs glibc's bits/libc-header-start.h. That
+        # header ships in libc6-dev, not libclang-dev, so a Linux runner without
+        # it fails to generate bindings even though nothing here links.
+        run: sudo apt-get update && sudo apt-get install -y libclang-dev libc6-dev
       # `rustup show` installs the toolchain pinned by rust-toolchain.toml.
       - name: Activate the pinned toolchain
         run: rustup show
