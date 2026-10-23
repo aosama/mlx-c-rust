@@ -37,6 +37,8 @@ To link against an MLX-C you provide yourself instead, in first-match order:
 2. The standard Homebrew prefixes, after `brew install mlx-c`.
 3. `pkg-config mlx-c`.
 
+**Bindings-only mode** — consumers whose native image is deliberately not any library this crate can discover (for example a pinned, patched MLX fork from their own native orchestration) take the bridge alone: `mlx-c-rust = { version = "…", default-features = false }`. The build script then emits zero link directives — no ladder, no pair build, no side effects — and the consumer's own build supplies and links its native libraries. Everything else (declarations, captured-error translation, handle types, operation families) is identical.
+
 ## Versioning
 
 The crate version names the **MLX release it is verified against** (the scheme mlx-rs established for user-facing crates): crate `0.32.4.x` is verified against MLX `v0.32.4`. The bound MLX-C release rides in the README headline and `COVERAGE_INVENTORY.md`. MLX-C is the carrier for the C bridge, not the pace-setter: when no MLX-C release pairs with the newest MLX, the native build engine applies this repository's reviewed forward adaptations to the pinned MLX-C sources, and drops them when an MLX-C release catches up — so the crate tracks MLX releases even ahead of MLX-C. Both upstreams are pre-1.0, so minor releases may carry breaking changes when upstream does; our own fixes and same-MLX MLX-C surface changes ride as patch bumps.

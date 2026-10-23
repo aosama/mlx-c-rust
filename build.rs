@@ -97,7 +97,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     println!("cargo:rerun-if-changed={}", include_directory.display());
-    println!("cargo:rerun-if-env-changed={MLX_C_PREFIX_VARIABLE}");
+    // The prefix variable only steers the link ladder; bindings-only
+    // consumers (no `link` feature) never read it, so their builds do not
+    // rebuild when it moves.
+    if link_feature_is_enabled() {
+        println!("cargo:rerun-if-env-changed={MLX_C_PREFIX_VARIABLE}");
+    }
 
     let bindings = bindgen::Builder::default()
         .header(mlx_c_header.to_string_lossy())
@@ -111,8 +116,23 @@ fn main() -> Result<(), Box<dyn Error>> {
     write_bridged_inventory(&bindings_content, &output_directory)?;
     bindings.write_to_file(output_directory.join("mlx_c_bindings.rs"))?;
 
-    emit_link_instructions();
+    // The link feature carries the entire link ladder. Bindings-only
+    // consumers — those providing their own native MLX build, deliberately
+    // not this crate's pinned pair — depend with default-features = false
+    // and receive the declarations, the captured-error translation, the
+    // owned handle types, and the operation families with ZERO link
+    // directives: they own the linker, and this crate must not select a
+    // library for them or trigger side effects like a pair build.
+    if link_feature_is_enabled() {
+        emit_link_instructions();
+    }
     Ok(())
+}
+
+/// Whether the default-on `link` feature is active for this compilation.
+/// Cargo exports every enabled feature as CARGO_FEATURE_<NAME>.
+fn link_feature_is_enabled() -> bool {
+    env::var_os("CARGO_FEATURE_LINK").is_some_and(|feature_value| feature_value != "0")
 }
 
 /// Emits the linker instructions for an MLX-C library. Non-mac hosts stop

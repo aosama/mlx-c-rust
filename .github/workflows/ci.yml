@@ -115,6 +115,12 @@ jobs:
         run: cargo clippy --all-targets --target aarch64-apple-darwin -- -D warnings
       - name: Build documentation for the docs.rs target
         run: cargo doc --no-deps --target aarch64-apple-darwin
+      # Bindings-only consumers — those providing their own native MLX
+      # build — compile this crate with default-features = false and no
+      # link directives; this proves that mode stays buildable on exactly
+      # the host class where they document and check their projects.
+      - name: Check the bindings-only mode
+        run: cargo check --no-default-features
       # The same size ceiling the pre-commit hook enforces on staged files,
       # enforced here on the whole repository so a clone without hooks
       # cannot regress it.
