@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: Format, lints, and compile checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: "true"
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install libclang for bindgen
+        run: sudo apt-get update && sudo apt-get install -y libclang-dev
+      # `rustup show` installs the toolchain pinned by rust-toolchain.toml.
+      - name: Activate the pinned toolchain
+        run: rustup show
+      - name: Install formatter and linter components
+        run: rustup component add rustfmt clippy
+      - name: Configure the shared compilation cache
+        uses: mozilla/sccache-action@v0.0.9
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      # Clippy runs the check pipeline, so it never links a binary and needs
+      # no MLX-C library on this Linux job; the vendored headers drive bindgen.
+      - name: Lint with clippy treating warnings as errors
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Build documentation
+        run: cargo doc --no-deps
+
+  test:
+    name: Link and run tests against a real MLX-C
+    runs-on: macos-latest
+    timeout-minutes: 45
+    env:
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: "true"
+      MLX_C_RUST_MLX_C_PREFIX: ${{ github.workspace }}/target/native-prefix
+    steps:
+      - uses: actions/checkout@v7
+      - name: Activate the pinned toolchain
+        run: rustup show
+      - name: Configure the shared compilation cache
+        uses: mozilla/sccache-action@v0.0.9
+      - name: Restore the native MLX and MLX-C build
+        id: native-cache
+        uses: actions/cache@v5
+        with:
+          # The cache key follows the vendored MLX-C tree: a pin bump changes
+          # the headers, misses the cache, and rebuilds the native libraries.
+          key: native-mlx-0.32.3-mlx-c-0.7.0-${{ hashFiles('vendor/mlx-c/mlx/c/mlx.h') }}
+          path: target/native-prefix
+      - name: Build MLX and MLX-C from the pinned releases
+        if: steps.native-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p target/native-sources && cd target/native-sources
+          curl -sSL https://github.com/ml-explore/mlx/archive/refs/tags/v0.32.3.tar.gz | tar xz
+          curl -sSL https://github.com/ml-explore/mlx-c/archive/refs/tags/v0.7.0.tar.gz | tar xz
+          mv mlx-0.32.3 mlx
+          mv mlx-c-0.7.0 mlx-c
+          cmake -S mlx -B mlx-build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=ON \
+            -DMLX_METAL_JIT=ON \
+            -DCMAKE_INSTALL_PREFIX="$MLX_C_RUST_MLX_C_PREFIX"
+          cmake --build mlx-build --parallel "$(sysctl -n hw.logicalcpu)"
+          cmake --install mlx-build
+          cmake -S mlx-c -B mlx-c-build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=ON \
+            -DMLX_DIR="$PWD/mlx-build" \
+            -DCMAKE_INSTALL_PREFIX="$MLX_C_RUST_MLX_C_PREFIX"
+          cmake --build mlx-c-build --parallel "$(sysctl -n hw.logicalcpu)"
+          cmake --install mlx-c-build
+      - name: Run the test suite serially
+        run: cargo test -- --test-threads=1
