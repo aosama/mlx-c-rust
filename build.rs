@@ -39,25 +39,33 @@ const BINDGEN_TYPE_ALLOWLIST: &str = "mlx_.*";
 /// headers.
 const BRIDGED_INVENTORY_FILE_NAME: &str = "bridged_inventory.rs";
 
-/// Include arguments that make bindgen's clang able to parse the vendored
-/// headers on a Linux host. Clang reaches for the host glibc `<stdint.h>`,
-/// whose `bits/` directory lives in the distribution's multiarch include
-/// path (`/usr/include/x86_64-linux-gnu` and friends); some libclang
-/// builds — the ones docs.rs and some hosted runners select — never add
-/// that directory to their search path, and binding generation dies with
-/// `bits/libc-header-start.h not found`. An explicit `-I` resolves the
-/// header regardless of which libclang won the loading search. The
-/// directory never exists on macOS hosts, whose single-architecture SDK
-/// layout carries those headers directly, so the same check is a no-op
-/// there — kept runtime-pure so every host type-checks the same code.
-fn linux_host_include_arguments() -> Vec<String> {
-    let host_triplet_include_directory =
+/// Clang arguments that make bindgen's vendored-header parse independent of
+/// whichever libclang won the loading search on a Linux host. The evidence
+/// from hosted Linux runners — docs.rs behind them — is that the loaded
+/// libclang can carry a default target triple that does not match the
+/// 64-bit host, and one misload surfaces as two different fatalities.
+/// First: the distribution's multiarch include directory
+/// (`/usr/include/x86_64-linux-gnu`) never enters the search path, so the
+/// host `<stdint.h>` dies on `bits/libc-header-start.h`. Supplying that
+/// directory exposes the second surface: with the host architecture macro
+/// undefined, glibc's `gnu/stubs.h` selects the 32-bit stubs and dies on
+/// `gnu/stubs-32.h`. Both trace to the same root, so the fix names the
+/// parse explicitly: `--target=<host-triplet>` restores the architecture
+/// macros (and clang's own Linux path logic where implemented), while the
+/// explicit `-I` guarantees the multiarch directory regardless. The
+/// directory existence check doubles as a Debian-layout detector; hosts
+/// without it — macOS and musl systems — keep the default parse, where it
+/// is already correct.
+fn linux_host_clang_arguments() -> Vec<String> {
+    let host_multiarch_include_directory =
         format!("/usr/include/{}-linux-gnu", std::env::consts::ARCH);
-    if Path::new(&host_triplet_include_directory).is_dir() {
-        vec![format!("-I{host_triplet_include_directory}")]
-    } else {
-        Vec::new()
+    if !Path::new(&host_multiarch_include_directory).is_dir() {
+        return Vec::new();
     }
+    vec![
+        format!("--target={}-unknown-linux-gnu", std::env::consts::ARCH),
+        format!("-I{host_multiarch_include_directory}"),
+    ]
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -80,7 +88,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let bindings = bindgen::Builder::default()
         .header(mlx_c_header.to_string_lossy())
         .clang_arg(format!("-I{}", include_directory.display()))
-        .clang_args(linux_host_include_arguments())
+        .clang_args(linux_host_clang_arguments())
         .allowlist_function(BINDGEN_FUNCTION_ALLOWLIST)
         .allowlist_type(BINDGEN_TYPE_ALLOWLIST)
         .generate_comments(false)
