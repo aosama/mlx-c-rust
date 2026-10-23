@@ -30,6 +30,17 @@
 //! exists precisely so that every MLX-C capability is reachable without
 //! waiting for a wrapper to be written on demand.
 //!
+//! # Bindings-only mode
+//!
+//! Consumers who provide their own native MLX build — for example a pinned,
+//! patched fork produced by their own native orchestration — can take this
+//! crate as the bridge alone: depend with `default-features = false` and
+//! the build script emits no link directives at all. The vendored-header
+//! declarations, the captured-error machinery, the owned handle types, and
+//! every operation wrapper family are identical; the consumer's own build
+//! supplies and links the native libraries. The default `link` feature
+//! carries the whole discovery ladder for everyone else.
+//!
 //! # Test placement
 //!
 //! Tests that never touch MLX-C symbols (the error-channel machinery) live

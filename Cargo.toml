@@ -48,6 +48,19 @@ all = { level = "warn", priority = -1 }
 [dependencies]
 thiserror = "2"
 
+[features]
+default = ["link"]
+# The `link` feature carries the build script's entire link ladder: the
+# prefix variable, the machine-shared zero-configuration pair, Homebrew,
+# and pkg-config. Consumers who provide their OWN native MLX build — for
+# example a pinned, patched fork from their own native orchestration —
+# depend with default-features = false and get the bindings-only mode: the
+# vendored-header declarations, the captured-error translation, the owned
+# handle types, and the operation wrapper families, with zero link
+# directives. They own the linker; this crate must not select a library
+# for them or trigger side effects like compiling the pinned pair.
+link = []
+
 [build-dependencies]
 bindgen = "0.73"
 pkg-config = "0.3"

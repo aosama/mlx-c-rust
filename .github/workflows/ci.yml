@@ -115,6 +115,19 @@ jobs:
         run: cargo clippy --all-targets --target aarch64-apple-darwin -- -D warnings
       - name: Build documentation for the docs.rs target
         run: cargo doc --no-deps --target aarch64-apple-darwin
+      # Bindings-only consumers — those providing their own native MLX
+      # build — compile this crate with default-features = false; cargo
+      # check proves the mode compiles, and the assertion proves the actual
+      # contract: the build script emitted zero link directives (a fresh
+      # runner has exactly one build-script output file, so the search is
+      # unambiguous).
+      - name: Check the bindings-only mode and prove it emits no link directives
+        run: |
+          cargo check --no-default-features --target aarch64-apple-darwin
+          if grep --quiet "cargo:rustc-link" target/aarch64-apple-darwin/debug/build/mlx-c-rust-*/output; then
+            echo "the bindings-only mode emitted link directives" >&2
+            exit 1
+          fi
       # The same size ceiling the pre-commit hook enforces on staged files,
       # enforced here on the whole repository so a clone without hooks
       # cannot regress it.

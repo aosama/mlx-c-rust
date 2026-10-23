@@ -20,8 +20,9 @@ struct VerificationLane {
 /// The lanes, in the continuous-integration lane's order. Clippy and doc
 /// target aarch64-apple-darwin — the one target this crate ships and
 /// documents — so the local mirror cannot drift from what the runner
-/// proves.
-const VERIFICATION_LANES: [VerificationLane; 3] = [
+/// proves. The bindings-only lane compiles with the `link` feature off,
+/// the mode consumers who provide their own native MLX build take.
+const VERIFICATION_LANES: [VerificationLane; 4] = [
     VerificationLane {
         lane_name: "formatting",
         cargo_arguments: &["fmt", "--all", "--", "--check"],
@@ -41,6 +42,15 @@ const VERIFICATION_LANES: [VerificationLane; 3] = [
     VerificationLane {
         lane_name: "documentation",
         cargo_arguments: &["doc", "--no-deps", "--target", "aarch64-apple-darwin"],
+    },
+    VerificationLane {
+        lane_name: "bindings-only",
+        cargo_arguments: &[
+            "check",
+            "--no-default-features",
+            "--target",
+            "aarch64-apple-darwin",
+        ],
     },
 ];
 
