@@ -19,20 +19,6 @@ impl MlxString {
         Self(raw_string)
     }
 
-    /// Creates an owned string from host UTF-8 text.
-    pub fn from_str(value: &str) -> Result<Self, MlxCError> {
-        let value_argument = CString::new(value).map_err(|_| MlxCError {
-            operation: "create an MLX string",
-            description: "string contains an interior null byte".to_owned(),
-        })?;
-        // SAFETY: The C string remains valid for this copying constructor and
-        // the returned handle enters RAII ownership.
-        let raw_string = unsafe { raw::mlx_string_new_data(value_argument.as_ptr()) };
-        let string = Self(raw_string);
-        string.require_populated("create an MLX string")?;
-        Ok(string)
-    }
-
     /// Copies the source string handle into this handle.
     pub fn set(&mut self, source: &Self) -> Result<(), MlxCError> {
         // SAFETY: Both handles are live and this call only replaces the owned
@@ -79,5 +65,24 @@ impl Drop for MlxString {
         unsafe {
             raw::mlx_string_free(self.0);
         }
+    }
+}
+
+/// Creates an owned string from host UTF-8 text, so `"text".parse::<MlxString>()`
+/// and `MlxString::from_str` both construct live handles.
+impl std::str::FromStr for MlxString {
+    type Err = MlxCError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        let value_argument = CString::new(value).map_err(|_| MlxCError {
+            operation: "create an MLX string",
+            description: "string contains an interior null byte".to_owned(),
+        })?;
+        // SAFETY: The C string remains valid for this copying constructor and
+        // the returned handle enters RAII ownership.
+        let raw_string = unsafe { raw::mlx_string_new_data(value_argument.as_ptr()) };
+        let string = Self(raw_string);
+        string.require_populated("create an MLX string")?;
+        Ok(string)
     }
 }

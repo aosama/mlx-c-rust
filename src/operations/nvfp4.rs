@@ -76,7 +76,6 @@ impl MlxBindingsContext {
                 )
             }
         })
-        .map_err(MlxCError::from)
     }
 
     /// Builds an NVFP4 matrix multiplication using MLX's native packed representation.
@@ -113,7 +112,6 @@ impl MlxBindingsContext {
                 )
             }
         })
-        .map_err(MlxCError::from)
     }
 }
 

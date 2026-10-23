@@ -67,9 +67,7 @@ impl MlxCompiledGraph {
                 ),
             });
         }
-        output_vector
-            .array_at(0, apply_operation)
-            .map_err(MlxCError::from)
+        output_vector.array_at(0, apply_operation)
     }
 
     /// Applies the compiled graph and returns every output it produced.
@@ -103,7 +101,6 @@ impl MlxCompiledGraph {
         (0..output_count)
             .map(|output_index| output_vector.array_at(output_index, apply_operation))
             .collect::<Result<Vec<_>, MlxCError>>()
-            .map_err(MlxCError::from)
     }
 }
 
@@ -136,6 +133,10 @@ pub fn graph_output_array(
 }
 
 /// Publishes the single output of a single-output graph builder.
+///
+/// # Safety
+/// The caller must guarantee that `output_vector` is unique, live, and a
+/// valid `mlx_vector_array` destination for the whole call.
 pub unsafe fn set_graph_output(
     output_vector: *mut raw::mlx_vector_array,
     graph_output: &MlxArray,
@@ -156,6 +157,10 @@ pub unsafe fn set_graph_output(
 /// its whole-vector set allocates on demand; collecting the outputs locally and
 /// publishing them once at the end of the builder is therefore the only trace-
 /// safe multi-output pattern.
+///
+/// # Safety
+/// The caller must guarantee that `output_vector` is unique, live, and a
+/// valid `mlx_vector_array` destination for the whole call.
 pub unsafe fn set_graph_output_vector(
     output_vector: *mut raw::mlx_vector_array,
     graph_outputs: &[&MlxArray],

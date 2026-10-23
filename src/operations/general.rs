@@ -418,13 +418,13 @@ impl MlxBindingsContext {
     /// Materializes one uint32 array contiguously and copies its bounded values.
     pub fn copy_u32_values(&self, input: &MlxArray) -> Result<Vec<u32>, MlxCError> {
         let contiguous_values = self.build_contiguous_row_major_copy(input)?;
-        contiguous_values.to_vec_u32().map_err(MlxCError::from)
+        contiguous_values.to_vec_u32()
     }
 
     /// Materializes one uint8 array contiguously and copies it in one host transfer.
     pub fn copy_u8_values(&self, input: &MlxArray) -> Result<Vec<u8>, MlxCError> {
         let contiguous_values = self.build_contiguous_row_major_copy(input)?;
-        contiguous_values.to_vec_u8().map_err(MlxCError::from)
+        contiguous_values.to_vec_u8()
     }
 
     /// Builds a lazy row-major contiguous copy without evaluating it.

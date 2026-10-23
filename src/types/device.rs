@@ -33,7 +33,7 @@ impl MlxDeviceHandle {
     }
 
     /// The process's default device.
-    pub fn default() -> Result<Self, MlxCError> {
+    pub fn default_device() -> Result<Self, MlxCError> {
         let operation: &'static str = "acquire the MLX default device";
         let mut output = Self::empty();
         // SAFETY: The output pointer is valid writable storage for one

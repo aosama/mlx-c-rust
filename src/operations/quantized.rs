@@ -44,7 +44,6 @@ impl MlxBindingsContext {
                 )
             }
         })
-        .map_err(MlxCError::from)
     }
 
     /// Builds an affine quantized matrix multiplication using parameters supported by MLX.
@@ -96,7 +95,6 @@ impl MlxBindingsContext {
                 )
             }
         })
-        .map_err(MlxCError::from)
     }
 
     /// Builds selected affine quantized matrix multiplications for MoE experts.
@@ -158,7 +156,6 @@ impl MlxBindingsContext {
                 )
             }
         })
-        .map_err(MlxCError::from)
     }
 }
 

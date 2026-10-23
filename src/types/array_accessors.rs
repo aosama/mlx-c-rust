@@ -275,8 +275,13 @@ impl MlxArray {
 
     /// Copies the float16 scalar value as raw bits.
     ///
+    /// Only on 64-bit ARM: the vendored `mlx/c/half.h` declares the float16
+    /// entry points under `defined(__ARM_FEATURE_FP16_SCALAR_ARITHMETIC) ||
+    /// defined(__aarch64__)`, so the bridge mirrors that availability.
+    ///
     /// # Errors
     /// Returns the captured MLX-C description when the read fails.
+    #[cfg(target_arch = "aarch64")]
     pub fn item_f16_bits(&self) -> Result<u16, MlxCError> {
         let mut value = raw::__BindgenFloat16(0);
         // SAFETY: The output pointer is valid writable storage and `self`
@@ -288,8 +293,12 @@ impl MlxArray {
 
     /// Copies the bfloat16 scalar value as raw bits.
     ///
+    /// Only on 64-bit ARM, mirroring the `__bf16` guard in the vendored
+    /// `mlx/c/half.h`.
+    ///
     /// # Errors
     /// Returns the captured MLX-C description when the read fails.
+    #[cfg(target_arch = "aarch64")]
     pub fn item_bf16_bits(&self) -> Result<u16, MlxCError> {
         let mut value: u16 = 0;
         // SAFETY: The output pointer is valid writable storage and `self`
@@ -389,8 +398,12 @@ impl MlxArray {
 
     /// Copies the evaluated float16 storage into Rust memory as raw bits.
     ///
+    /// Only on 64-bit ARM, mirroring the float16 guard in the vendored
+    /// `mlx/c/half.h`.
+    ///
     /// # Errors
     /// Returns the captured MLX-C description when the copy fails.
+    #[cfg(target_arch = "aarch64")]
     pub fn to_vec_f16_bits(&self) -> Result<Vec<u16>, MlxCError> {
         self.copy_evaluated_storage(
             |array| unsafe { raw::mlx_array_data_float16(array) }.cast(),
@@ -400,8 +413,12 @@ impl MlxArray {
 
     /// Copies the evaluated bfloat16 storage into Rust memory as raw bits.
     ///
+    /// Only on 64-bit ARM, mirroring the bfloat16 guard in the vendored
+    /// `mlx/c/half.h`.
+    ///
     /// # Errors
     /// Returns the captured MLX-C description when the copy fails.
+    #[cfg(target_arch = "aarch64")]
     pub fn to_vec_bf16_bits(&self) -> Result<Vec<u16>, MlxCError> {
         self.copy_evaluated_storage(
             |array| unsafe { raw::mlx_array_data_bfloat16(array) },

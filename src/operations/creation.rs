@@ -5,17 +5,17 @@ use crate::{MlxArray, MlxDtype, raw};
 impl MlxBindingsContext {
     /// Copies float32 values into a new owned MLX array after validating shape arithmetic.
     pub fn array_from_f32(&self, values: &[f32], shape: &[i32]) -> Result<MlxArray, MlxCError> {
-        MlxArray::from_f32(values, shape).map_err(MlxCError::from)
+        MlxArray::from_f32(values, shape)
     }
 
     /// Copies int32 values into a new owned MLX array after validating shape arithmetic.
     pub fn array_from_i32(&self, values: &[i32], shape: &[i32]) -> Result<MlxArray, MlxCError> {
-        MlxArray::from_i32(values, shape).map_err(MlxCError::from)
+        MlxArray::from_i32(values, shape)
     }
 
     /// Copies uint32 values into a new owned MLX array after validating shape arithmetic.
     pub fn array_from_u32(&self, values: &[u32], shape: &[i32]) -> Result<MlxArray, MlxCError> {
-        MlxArray::from_u32(values, shape).map_err(MlxCError::from)
+        MlxArray::from_u32(values, shape)
     }
 
     /// Creates an int32 half-open range with unit stride.

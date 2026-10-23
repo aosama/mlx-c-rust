@@ -37,6 +37,9 @@ impl MlxBindingsContext {
     }
 
     /// Applies MLX-C `mlx_gather_qqmm` on the runtime GPU stream.
+    /// The wide signature mirrors the MLX-C declaration one-to-one; grouping
+    /// the parameters would hide which C argument each one feeds.
+    #[allow(clippy::too_many_arguments)]
     pub fn gather_qqmm(
         &self,
         x: &MlxArray,
@@ -75,6 +78,9 @@ impl MlxBindingsContext {
     }
 
     /// Applies MLX-C `mlx_qqmm` on the runtime GPU stream.
+    /// The wide signature mirrors the MLX-C declaration one-to-one; grouping
+    /// the parameters would hide which C argument each one feeds.
+    #[allow(clippy::too_many_arguments)]
     pub fn qqmm(
         &self,
         x: &MlxArray,

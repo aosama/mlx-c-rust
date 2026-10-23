@@ -10,6 +10,9 @@ use crate::raw;
 use crate::{MlxArray, MlxBindingsContext, MlxCError};
 impl MlxBindingsContext {
     /// Applies MLX-C `mlx_conv_general` on the runtime GPU stream.
+    /// The wide signature mirrors the MLX-C declaration one-to-one; grouping
+    /// the parameters would hide which C argument each one feeds.
+    #[allow(clippy::too_many_arguments)]
     pub fn conv_general(
         &self,
         input: &MlxArray,
@@ -48,6 +51,9 @@ impl MlxBindingsContext {
     }
 
     /// Applies MLX-C `mlx_conv_transpose1d` on the runtime GPU stream.
+    /// The wide signature mirrors the MLX-C declaration one-to-one; grouping
+    /// the parameters would hide which C argument each one feeds.
+    #[allow(clippy::too_many_arguments)]
     pub fn conv_transpose1d(
         &self,
         input: &MlxArray,
@@ -77,6 +83,9 @@ impl MlxBindingsContext {
     }
 
     /// Applies MLX-C `mlx_conv_transpose2d` on the runtime GPU stream.
+    /// The wide signature mirrors the MLX-C declaration one-to-one; grouping
+    /// the parameters would hide which C argument each one feeds.
+    #[allow(clippy::too_many_arguments)]
     pub fn conv_transpose2d(
         &self,
         input: &MlxArray,
@@ -114,6 +123,9 @@ impl MlxBindingsContext {
     }
 
     /// Applies MLX-C `mlx_conv_transpose3d` on the runtime GPU stream.
+    /// The wide signature mirrors the MLX-C declaration one-to-one; grouping
+    /// the parameters would hide which C argument each one feeds.
+    #[allow(clippy::too_many_arguments)]
     pub fn conv_transpose3d(
         &self,
         input: &MlxArray,

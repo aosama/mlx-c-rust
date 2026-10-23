@@ -60,6 +60,11 @@ impl MlxArrayVector {
         unsafe { raw::mlx_vector_array_size(self.0) }
     }
 
+    /// Reports whether the vector holds no arrays.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     pub fn array_at(
         &self,
         output_index: usize,

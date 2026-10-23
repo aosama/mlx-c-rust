@@ -189,7 +189,6 @@ impl MlxBindingsContext {
         (0..output_count)
             .map(|output_index| output_vector.array_at(output_index, OPERATION))
             .collect::<Result<Vec<_>, MlxCError>>()
-            .map_err(MlxCError::from)
     }
 }
 

@@ -107,7 +107,6 @@ impl MlxBindingsContext {
                 )
             }
         })
-        .map_err(MlxCError::from)
     }
 }
 
