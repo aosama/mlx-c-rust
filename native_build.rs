@@ -24,14 +24,138 @@ use std::{
 use sha2::{Digest, Sha256};
 
 /// The native pair this crate version is verified against. The crate version
-/// names the MLX side; bump these together with the version.
-pub const PINNED_MLX_TAG: &str = "v0.32.3";
+/// names the MLX side; bump these together with the version. MLX-C is the
+/// carrier for the C bridge, not the pace-setter: when no MLX-C release
+/// pairs with the pinned MLX yet, the forward edit set below adapts the
+/// pinned MLX-C sources to it until upstream catches up.
+pub const PINNED_MLX_TAG: &str = "v0.32.4";
 pub const PINNED_MLX_C_TAG: &str = "v0.7.0";
 pub const PINNED_MLX_TARBALL_SHA256: &str =
-    "4129039ddcb36cb860982b616c975a5b9b8e6d8fa97efa86335b4427c29c4b4b";
+    "0276db8d7bf1af8db6d4ae25c7c550abea4d5b3b6a16207610a5d4a0c19fe1a0";
 pub const PINNED_MLX_C_TARBALL_SHA256: &str =
     "ee726bb38e191bb3c516a6bae47dc8abad9e5f273873385839019ce46bfceab5";
 const PINNED_TARBALL_BASE_URL: &str = "https://github.com";
+
+/// Version of the build recipe itself, folded into the prefix identity.
+/// Recipe 3 is the first to carry the forward edit set (see below) and to
+/// compile MLX-C against THIS engine's pinned MLX through MLX_C_USE_SYSTEM_
+/// MLX; recipe 2 added system-MLX linkage; recipe 1 left the option unset,
+/// so MLX-C's CMake took its FetchContent fallback — cloning an older MLX
+/// and compiling it a second time inside the MLX-C build tree, doubling
+/// every cold journey and version-skewing the pair. Bump this when the
+/// recipe's build semantics change, so machines holding a prefix built the
+/// old way orphan it exactly like a pin bump would.
+const PINNED_PAIR_BUILD_RECIPE: &str = "recipe-3-forward-edits";
+
+/// One reviewed forward adaptation of the pinned MLX-C sources to the
+/// pinned MLX, carried until an MLX-C release pairs with that MLX (see
+/// `drop_with`). C++-side only: the C surface this crate binds is
+/// untouched, and COVERAGE_INVENTORY.md's pairing note mirrors this set.
+struct ForwardSourceEdit {
+    /// Path of the edited file, relative to the extracted MLX-C tree.
+    path: &'static str,
+    /// The exact text to find. It must occur exactly once — or, on a retry
+    /// over already-edited sources, exactly zero times with the replacement
+    /// present once — so a drifted upstream fails the build loudly instead
+    /// of editing the wrong site.
+    find: &'static str,
+    /// The replacement text.
+    replacement: &'static str,
+    /// The MLX-C release that makes this edit droppable; each MLX-C release
+    /// reconciles this set.
+    drop_with: &'static str,
+}
+
+const MLX_C_FORWARD_SOURCE_EDITS: &[ForwardSourceEdit] = &[ForwardSourceEdit {
+    path: "mlx/c/ops.cpp",
+    find: r#"        mlx::core::gather_qmm(
+            mlx_array_get_(x),
+            mlx_array_get_(w),
+            mlx_array_get_(scales),
+            (biases.ctx ? std::make_optional(mlx_array_get_(biases))
+                        : std::nullopt),
+            (lhs_indices.ctx ? std::make_optional(mlx_array_get_(lhs_indices))
+                             : std::nullopt),
+            (rhs_indices.ctx ? std::make_optional(mlx_array_get_(rhs_indices))
+                             : std::nullopt),
+            transpose,
+            (group_size.has_value ? std::make_optional<int>(group_size.value)
+                                  : std::nullopt),
+            (bits.has_value ? std::make_optional<int>(bits.value)
+                            : std::nullopt),
+            std::string(mode),"#,
+    replacement: r#"        mlx::core::gather_qmm(
+            mlx_array_get_(x),
+            mlx_array_get_(w),
+            mlx_array_get_(scales),
+            (biases.ctx ? std::make_optional(mlx_array_get_(biases))
+                        : std::nullopt),
+            (lhs_indices.ctx ? std::make_optional(mlx_array_get_(lhs_indices))
+                             : std::nullopt),
+            (rhs_indices.ctx ? std::make_optional(mlx_array_get_(rhs_indices))
+                             : std::nullopt),
+            transpose,
+            (group_size.has_value ? std::make_optional<int>(group_size.value)
+                                  : std::nullopt),
+            (bits.has_value ? std::make_optional<int>(bits.value)
+                            : std::nullopt),
+            std::string(mode),
+            std::nullopt,"#,
+    drop_with: "the MLX-C release pairing with MLX v0.32.4, whose \
+                    gather_qmm call gains the global_scale parameter this \
+                    edit bridges over",
+}];
+
+/// Applies the forward edit set to the extracted MLX-C tree. Idempotent: a
+/// retry over sources edited by a previous attempt recognizes the
+/// replacement and moves on, so a failed later step never wedges the
+/// working directory.
+fn apply_forward_source_edits(mlx_c_directory: &Path) -> Option<()> {
+    for forward_edit in MLX_C_FORWARD_SOURCE_EDITS {
+        let edited_file = mlx_c_directory.join(forward_edit.path);
+        let source_content = match std::fs::read_to_string(&edited_file) {
+            Ok(read_content) => read_content,
+            Err(read_error) => {
+                println!(
+                    "cargo:warning=forward edit could not read {}: {read_error}",
+                    edited_file.display()
+                );
+                return None;
+            }
+        };
+        let find_occurrences = source_content.matches(forward_edit.find).count();
+        if find_occurrences == 1 {
+            let patched_content =
+                source_content.replacen(forward_edit.find, forward_edit.replacement, 1);
+            if let Err(write_error) = std::fs::write(&edited_file, patched_content) {
+                println!(
+                    "cargo:warning=forward edit could not write {}: {write_error}",
+                    edited_file.display()
+                );
+                return None;
+            }
+        } else {
+            let replacement_occurrences = source_content.matches(forward_edit.replacement).count();
+            if find_occurrences == 0 && replacement_occurrences == 1 {
+                // Already applied by a previous attempt over the same
+                // extracted tree; the edit set is idempotent by design.
+                continue;
+            }
+            println!(
+                "cargo:warning=forward edit for {} found its target {} times \
+                 (already-applied form {} times); the pinned MLX-C sources \
+                 drifted — reconcile the forward edit set (droppable with \
+                 {})",
+                forward_edit.path,
+                find_occurrences,
+                replacement_occurrences,
+                forward_edit.drop_with
+            );
+            return None;
+        }
+    }
+    Some(())
+}
 
 /// The progress-file environment variable: when it names an absolute file,
 /// every structured progress line is appended there in addition to stdout.
@@ -44,14 +168,16 @@ pub const NATIVE_BUILD_PROGRESS_FILE_VARIABLE: &str = "MLX_C_RUST_NATIVE_PROGRES
 const MLX_C_SHARED_CACHE_DIRECTORY: &str = ".cache/mlx-c-rust/native";
 const COMPLETION_MARKER_DIRECTORY: &str = "complete";
 
-/// The content-addressed identity of the pinned pair: any change to the tags
-/// or their verified checksums changes the directory, orphaning stale work.
+/// The content-addressed identity of the pinned pair: any change to the tags,
+/// their verified checksums, or the build recipe below changes the directory,
+/// orphaning stale work.
 pub fn pinned_pair_identity() -> String {
     let mut hasher = Sha256::new();
     hasher.update(PINNED_MLX_TAG);
     hasher.update(PINNED_MLX_TARBALL_SHA256);
     hasher.update(PINNED_MLX_C_TAG);
     hasher.update(PINNED_MLX_C_TARBALL_SHA256);
+    hasher.update(PINNED_PAIR_BUILD_RECIPE);
     format!("{:x}", hasher.finalize())[..16].to_owned()
 }
 
@@ -225,6 +351,17 @@ pub fn ensure_pinned_pair() -> NativeBuildOutcome {
     }
     extract_operation.complete("ok");
 
+    // Before any configure: bring the pinned MLX-C sources up to the pinned
+    // MLX. Skipping this on a pairing gap is not an option — the compile
+    // would fail (or, historically, silently take the FetchContent fallback
+    // and build a second, older MLX).
+    let forward_edit_operation = begin(progress_file_path.as_deref(), "forward-edits");
+    if apply_forward_source_edits(&mlx_c_directory).is_none() {
+        forward_edit_operation.complete("failed");
+        return NativeBuildOutcome::Failed;
+    }
+    forward_edit_operation.complete("ok");
+
     let parallelism = std::env::var("NUM_JOBS").unwrap_or_else(|_| "4".to_owned());
     let mlx_build = working_directory.join("mlx-build");
     let mlx_marker = marker_directory.join("mlx");
@@ -260,6 +397,12 @@ pub fn ensure_pinned_pair() -> NativeBuildOutcome {
         });
         if configured.is_none() {
             operation.complete("failed");
+            // A failed CMake configure leaves a CMakeCache.txt that pins the
+            // poisoned attempt — a stale MLX_DIR, an old option set — which a
+            // retry, including one through a changed recipe, must not
+            // inherit; find_package consults the cached value first, ahead of
+            // any prefix path. Start the next attempt from a clean cache.
+            let _ = std::fs::remove_dir_all(&mlx_build);
             return NativeBuildOutcome::Failed;
         }
         operation.complete("ok");
@@ -280,7 +423,20 @@ pub fn ensure_pinned_pair() -> NativeBuildOutcome {
                 .arg("-DCMAKE_BUILD_TYPE=Release")
                 .arg("-DBUILD_SHARED_LIBS=ON")
                 .arg("-DMLX_BUILD_EXAMPLES=OFF")
-                .arg(format!("-DMLX_DIR={}", mlx_build.display()))
+                // THE switch that makes MLX-C compile against this engine's
+                // pinned MLX. MLX-C's CMake chooses between find_package(MLX)
+                // and a FetchContent fallback through MLX_C_USE_SYSTEM_MLX —
+                // leaving the option unset (the default) made the fallback
+                // clone an older MLX and compile it a second time inside
+                // mlx-c-build: every cold journey took twice the time and the
+                // pair was version-skewed against the documented pin. The
+                // hint is the INSTALLED config under the prefix (already
+                // placed by the MLX install step above): the build tree's own
+                // MLXConfig.cmake references install-time files that do not
+                // exist and resolves to broken paths, so CMAKE_PREFIX_PATH —
+                // not the build directory — is what find_package needs.
+                .arg("-DMLX_C_USE_SYSTEM_MLX=ON")
+                .arg(format!("-DCMAKE_PREFIX_PATH={}", prefix.display()))
                 .arg(format!("-DCMAKE_INSTALL_PREFIX={}", prefix.display())),
         )
         .and_then(|()| {
@@ -301,6 +457,9 @@ pub fn ensure_pinned_pair() -> NativeBuildOutcome {
         });
         if configured.is_none() {
             operation.complete("failed");
+            // Same cache-poisoning rationale as the MLX side: a failed
+            // configure must not pin its decisions into the retry.
+            let _ = std::fs::remove_dir_all(&mlx_c_build);
             return NativeBuildOutcome::Failed;
         }
         operation.complete("ok");
