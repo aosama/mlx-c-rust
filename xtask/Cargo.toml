@@ -11,4 +11,4 @@ publish = false
 # The xtask binary is the human and continuous-integration entry point for
 # the same native-build engine the crate's build script runs; one shared
 # module, two typed entry points, no shell.
-sha2 = "0.10"
+sha2 = "0.11"
