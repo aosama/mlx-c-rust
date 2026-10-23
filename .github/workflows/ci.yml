@@ -80,16 +80,6 @@ jobs:
             ~/.cargo/git
           key: mlx-c-rust-v1-cargo-downloads-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
           restore-keys: mlx-c-rust-v1-cargo-downloads-${{ runner.os }}-${{ runner.arch }}-
-      # The compiled pinned pair is a macOS artifact and this lane runs on
-      # Linux, exactly like docs.rs: nothing restores here because nothing
-      # links. The build script skips its native ladder on non-mac hosts,
-      # so bindgen's vendored-header parse is the only native-adjacent work.
-      - name: Restore the compiled pinned pair
-        id: native-pair-cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          key: native-pair-${{ hashFiles('native_build.rs') }}
-          path: ~/.cache/mlx-c-rust/native
       # The compiler cache on the directory backend (no SCCACHE_GHA_ENABLED),
       # keyed on the dependency graph — not github.sha — so the same graph
       # restores across commits; sccache is content-addressed and never
@@ -136,15 +126,6 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
           key: mlx-c-rust-v1-cargo-downloads-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
-      # The compiled pinned pair never exists on this Linux lane; the
-      # restore exists to keep the family in one workflow shape, and the
-      # save stays conditioned on the miss it always takes. macOS saves it.
-      - name: Save the compiled pinned pair
-        if: ${{ !cancelled() && steps.native-pair-cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          key: native-pair-${{ hashFiles('native_build.rs') }}
-          path: ~/.cache/mlx-c-rust/native
       # Default-branch-only, mirroring the astronomical lane: pull requests
       # restore from the default branch anyway, so a pull-request save is a
       # ref-scoped duplicate burning the repository cache budget.

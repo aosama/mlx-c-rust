@@ -18,20 +18,30 @@ warnings = "deny"
 # the vendored headers with the host's libclang.
 #
 # The bindgen-on-Linux gotcha (diagnosed on the hosted runners docs.rs
-# also uses): the libclang that wins clang-sys's loading search can carry
-# a default target triple that does not match the 64-bit host. One misload
-# then surfaces as two different fatalities — first the Debian/Ubuntu
-# multiarch include directory (/usr/include/<arch>-linux-gnu) never enters
-# the search path and <stdint.h> dies on `bits/libc-header-start.h`; once
-# that directory is supplied, glibc's gnu/stubs.h dies on `gnu/stubs-32.h`
-# because the host architecture macro is undefined and the 32-bit stubs
-# are selected. The build script therefore passes BOTH, whenever the
-# multiarch directory exists (which also serves as a Debian-layout
-# detector; macOS and musl hosts keep the default parse):
-#   --target=<host-arch>-unknown-linux-gnu  (restores the arch macros)
-#   -I/usr/include/<host-arch>-linux-gnu    (guarantees the search path)
-# Escape hatch for one-off diagnosis: BINDGEN_EXTRA_CLANG_ARGS appends to
-# what bindgen receives, on any host.
+# also uses): the libclang that wins clang-sys's loading search carries
+# defaults that do not describe this parse, and peeling that onion
+# surfaced three different fatalities, one per fix attempt. First the
+# Debian/Ubuntu multiarch include directory (/usr/include/<arch>-linux-gnu)
+# never enters the search path and <stdint.h> dies on
+# `bits/libc-header-start.h`; once that directory is supplied, glibc's
+# gnu/stubs.h dies on `gnu/stubs-32.h` because the default triple did not
+# match the 64-bit host; and once the triple is named, the vendor's
+# half.h still gates the float16/bfloat16 slice of the ABI on
+# __aarch64__, so an x86_64 parse silently DROPS symbols like
+# mlx_array_data_bfloat16 that this crate promises to bridge. The build
+# script therefore parses the AARCH64 VIEW on any Linux host — the ABI
+# this crate binds is Apple silicon by definition — while taking header
+# text from the host's installed glibc layout, whenever the multiarch
+# directory exists (which also serves as a Debian-layout detector; macOS
+# and musl hosts keep the default parse):
+#   --target=aarch64-unknown-linux-gnu   (the ABI view: opens the gates)
+#   -I/usr/include/<host-arch>-linux-gnu (host glibc multiarch headers)
+#   -I/usr/include                      (host glibc generic headers)
+# The ARM intrinsic headers the gates include (arm_fp16.h, arm_bf16.h)
+# are compiler-provided in clang's resource directory, so they resolve
+# under the aarch64 triple on any clang. Escape hatch for one-off
+# diagnosis: BINDGEN_EXTRA_CLANG_ARGS appends to what bindgen receives,
+# on any host.
 #
 # Linking and tests
 # -----------------

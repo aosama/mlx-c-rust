@@ -15,7 +15,9 @@
 //! (this crate's own code, no shell), which downloads the checksum-verified
 //! pinned sources and compiles them once into that same shared prefix. The
 //! pair therefore compiles once per machine per pin, and every later
-//! consumer reuses it.
+//! consumer reuses it. Non-mac hosts never enter the ladder at all: the
+//! link line it emits is Apple-framework-shaped end to end, so those hosts
+//! get a warning instead and compile or document without linking.
 
 #[path = "native_build.rs"]
 mod native_build;
@@ -39,23 +41,30 @@ const BINDGEN_TYPE_ALLOWLIST: &str = "mlx_.*";
 /// headers.
 const BRIDGED_INVENTORY_FILE_NAME: &str = "bridged_inventory.rs";
 
-/// Clang arguments that make bindgen's vendored-header parse independent of
-/// whichever libclang won the loading search on a Linux host. The evidence
-/// from hosted Linux runners — docs.rs behind them — is that the loaded
-/// libclang can carry a default target triple that does not match the
-/// 64-bit host, and one misload surfaces as two different fatalities.
-/// First: the distribution's multiarch include directory
-/// (`/usr/include/x86_64-linux-gnu`) never enters the search path, so the
-/// host `<stdint.h>` dies on `bits/libc-header-start.h`. Supplying that
-/// directory exposes the second surface: with the host architecture macro
-/// undefined, glibc's `gnu/stubs.h` selects the 32-bit stubs and dies on
-/// `gnu/stubs-32.h`. Both trace to the same root, so the fix names the
-/// parse explicitly: `--target=<host-triplet>` restores the architecture
-/// macros (and clang's own Linux path logic where implemented), while the
-/// explicit `-I` guarantees the multiarch directory regardless. The
-/// directory existence check doubles as a Debian-layout detector; hosts
-/// without it — macOS and musl systems — keep the default parse, where it
-/// is already correct.
+/// Clang arguments that make bindgen's vendored-header parse host-proof on
+/// Linux. Three distinct fatalities surfaced as this lane was proven, each
+/// a different symptom of the same fact: the libclang that wins the
+/// loading search carries defaults that do not describe this parse. First,
+/// the Debian/Ubuntu multiarch include directory never entered the search
+/// path, so the host `<stdint.h>` died on `bits/libc-header-start.h`;
+/// supplying it exposed the second: with the default triple not matching
+/// the 64-bit host, glibc's `gnu/stubs.h` selected the 32-bit stubs and
+/// died on `gnu/stubs-32.h`; naming a 64-bit host triple exposed the third
+/// and deepest: `half.h` gates the float16 and bfloat16 slice of the ABI
+/// on `__aarch64__`, so an x86_64 parse silently DROPS symbols like
+/// `mlx_array_data_bfloat16` that the bridge promises to carry — this
+/// crate binds the Apple silicon ABI, whatever machine documents it. The
+/// parse therefore names the aarch64 view explicitly while taking its
+/// system headers from the host's installed glibc layout — generic
+/// `/usr/include` plus its multiarch directory — a deliberate mixed
+/// fiction: type layout follows the ABI triple, header text follows the
+/// host. The ARM intrinsic headers the gates include (`arm_fp16.h`,
+/// `arm_bf16.h`) are compiler-provided in clang's resource directory
+/// rather than glibc's, so they resolve under the aarch64 triple on any
+/// clang. Hosts without the Debian layout — macOS, where every supported
+/// machine is Apple silicon and clang's default parse already takes the
+/// aarch64 view — keep the defaults. (An Intel Mac would need the same
+/// explicit target; no Intel machine can link this crate in any case.)
 fn linux_host_clang_arguments() -> Vec<String> {
     let host_multiarch_include_directory =
         format!("/usr/include/{}-linux-gnu", std::env::consts::ARCH);
@@ -63,8 +72,9 @@ fn linux_host_clang_arguments() -> Vec<String> {
         return Vec::new();
     }
     vec![
-        format!("--target={}-unknown-linux-gnu", std::env::consts::ARCH),
+        "--target=aarch64-unknown-linux-gnu".to_owned(),
         format!("-I{host_multiarch_include_directory}"),
+        "-I/usr/include".to_owned(),
     ]
 }
 
@@ -101,20 +111,25 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-/// Emits the linker instructions for an MLX-C library. The ladder, first
-/// match wins: the prefix variable, the machine-shared identity-keyed prefix
-/// (building it if absent — the zero-configuration default), Homebrew, and
-/// pkg-config. When nothing resolves, a warning is printed and no link flags
-/// are emitted: library compilation and documentation builds still work, and
-/// the failure surfaces only when a consumer links a binary.
+/// Emits the linker instructions for an MLX-C library. Non-mac hosts stop
+/// at a warning before any rung: the link line this ladder produces — a
+/// `libmlxc.dylib` plus Apple frameworks — could never work there, so even
+/// an explicit prefix variable would only yield unusable flags. On macOS,
+/// the ladder, first match wins: the prefix variable, the machine-shared
+/// identity-keyed prefix (building it if absent — the zero-configuration
+/// default), Homebrew, and pkg-config. When nothing resolves, a warning is
+/// printed and no link flags are emitted: library compilation and
+/// documentation builds still work, and the failure surfaces only when a
+/// consumer links a binary.
 fn emit_link_instructions() {
     if !cfg!(target_os = "macos") {
         // The pinned pair compiles MLX, which needs Apple's Metal stack: a
-        // non-mac host can never provide it. Documentation and check lanes
-        // never link, so the ladder stops here with a warning instead of
-        // burning build minutes (docs.rs builds are time-boxed) on a doomed
-        // CMake attempt. Linking consumers are on Apple silicon by
-        // definition.
+        // non-mac host can never provide it, and the dylib-plus-frameworks
+        // link line below has no meaning there — including for an explicit
+        // prefix variable. Documentation and check lanes never link, so the
+        // ladder stops here with a warning instead of burning build minutes
+        // (docs.rs builds are time-boxed) on a doomed CMake attempt.
+        // Linking consumers are on Apple silicon by definition.
         println!(
             "cargo:warning=no MLX-C library can be built on this host operating system; \
              the crate compiles and documents, but linking a binary that uses it needs \
