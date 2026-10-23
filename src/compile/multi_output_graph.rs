@@ -18,8 +18,8 @@ pub struct MlxCompiledMultiOutputGraph {
 
 impl MlxCompiledMultiOutputGraph {
     /// Compiles the given graph builder into a replayable multi-output graph.
-    /// See [`crate::compile::graph::MlxCompiledGraph::new`] for the
-    /// shapeless tradeoff.
+    /// The `shapeless` flag carries the same shape-specialization tradeoff as
+    /// the single-output compiled graph constructor.
     pub fn new(
         graph_builder: MlxGraphBuilder,
         compile_operation: &'static str,
