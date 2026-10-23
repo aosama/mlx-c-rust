@@ -30,7 +30,7 @@ jobs:
       - name: Install formatter and linter components
         run: rustup component add rustfmt clippy
       - name: Configure the shared compilation cache
-        uses: mozilla/sccache-action@v0.0.9
+        uses: mozilla/sccache-action@v0.0.11
       - name: Check formatting
         run: cargo fmt --all -- --check
       # Clippy runs the check pipeline, so it never links a binary and needs
@@ -53,10 +53,10 @@ jobs:
       - name: Activate the pinned toolchain
         run: rustup show
       - name: Configure the shared compilation cache
-        uses: mozilla/sccache-action@v0.0.9
+        uses: mozilla/sccache-action@v0.0.11
       - name: Restore the native MLX and MLX-C build
         id: native-cache
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           # The cache key follows the vendored MLX-C tree: a pin bump changes
           # the headers, misses the cache, and rebuilds the native libraries.
@@ -85,5 +85,7 @@ jobs:
             -DCMAKE_INSTALL_PREFIX="$MLX_C_RUST_MLX_C_PREFIX"
           cmake --build mlx-c-build --parallel "$(sysctl -n hw.logicalcpu)"
           cmake --install mlx-c-build
+      - name: Probe Metal GPU availability on the runner
+        run: cargo run --example metal_probe
       - name: Run the test suite serially
         run: cargo test -- --test-threads=1

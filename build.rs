@@ -9,8 +9,9 @@
 //! tree swap away and drift shows up as a compile or contract failure.
 //!
 //! Linking a binary that uses this crate requires an MLX-C library. Discovery
-//! order: the `MLX_C_RUST_MLX_C_PREFIX` environment variable (a prefix with
-//! `lib/`, optionally `lib/pkgconfig/`), then `pkg-config mlx-c`. When neither
+//! order: the `MLX_C_RUST_MLX_C_PREFIX` environment variable (a prefix whose
+//! `lib/` holds the MLX-C library — flags are emitted directly, with an
+//! embedded rpath for shared builds), then `pkg-config mlx-c`. When neither
 //! resolves, the crate still checks and builds documentation — only linking a
 //! consumer binary reports undefined symbols, with a warning printed here.
 
@@ -65,33 +66,48 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-/// Emits the linker instructions for an MLX-C library found through the
-/// prefix variable or pkg-config. When nothing is found, a warning is printed
-/// and no link flags are emitted: library compilation and documentation builds
-/// still work, and the failure surfaces only when a consumer links a binary.
+/// Emits the linker instructions for an MLX-C library. The prefix variable
+/// takes precedence and emits flags directly (the standard CMake install of
+/// MLX-C ships no pkg-config file, so relying on pkg-config alone would
+/// never resolve); pkg-config is the fallback for installations that do
+/// provide one. When neither resolves, a warning is printed and no link
+/// flags are emitted: library compilation and documentation builds still
+/// work, and the failure surfaces only when a consumer links a binary.
 fn emit_link_instructions() {
     if let Some(prefix) = env::var_os(MLX_C_PREFIX_VARIABLE) {
         let prefix = PathBuf::from(prefix);
-        // Route the prefix through pkg-config so the upstream mlx-c.pc — and
-        // its transitive MLX and framework flags — drives the exact link line.
-        for pkgconfig_directory in ["lib/pkgconfig", "lib"] {
-            let candidate = prefix.join(pkgconfig_directory);
-            if candidate.join("mlx-c.pc").is_file() {
-                // SAFETY: single-threaded build script; extending a process
-                // environment variable before any probe reads it is race-free.
-                unsafe {
-                    env::set_var(
-                        "PKG_CONFIG_PATH",
-                        env::join_paths(
-                            env::split_paths(&env::var_os("PKG_CONFIG_PATH").unwrap_or_default())
-                                .chain(std::iter::once(candidate)),
-                        )
-                        .expect("PKG_CONFIG_PATH pieces must be joinable"),
-                    );
+        let library_directory = prefix.join("lib");
+        let shared_library = library_directory.join("libmlxc.dylib");
+        let static_library = library_directory.join("libmlxc.a");
+        if shared_library.is_file() || static_library.is_file() {
+            println!(
+                "cargo:rustc-link-search=native={}",
+                library_directory.display()
+            );
+            if shared_library.is_file() {
+                // Both MLX and MLX-C install with @rpath install names and
+                // carry their own framework dependencies, so the consumer
+                // needs the two dylibs plus an embedded rpath — no DYLD
+                // environment variables at run time.
+                println!("cargo:rustc-link-lib=dylib=mlxc");
+                println!("cargo:rustc-link-lib=dylib=mlx");
+                println!(
+                    "cargo:rustc-link-arg=-Wl,-rpath,{}",
+                    library_directory.display()
+                );
+            } else {
+                println!("cargo:rustc-link-lib=static=mlxc");
+                println!("cargo:rustc-link-lib=static=mlx");
+                for framework in ["Metal", "Foundation", "QuartzCore", "Accelerate"] {
+                    println!("cargo:rustc-link-lib=framework={framework}");
                 }
-                break;
             }
+            return;
         }
+        println!(
+            "cargo:warning=MLX_C_RUST_MLX_C_PREFIX is set but {} holds no MLX-C library; falling back to pkg-config",
+            library_directory.display()
+        );
     }
     match PkgConfig::new().atleast_version("0.7.0").probe("mlx-c") {
         Ok(mlx_c) => {
