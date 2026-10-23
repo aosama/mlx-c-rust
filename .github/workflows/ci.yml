@@ -14,7 +14,7 @@ env:
 
 jobs:
   check:
-    name: Format, lints, and compile checks
+    name: Lint and document exactly as docs.rs builds it
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -27,18 +27,23 @@ jobs:
       # `rustup show` installs the toolchain pinned by rust-toolchain.toml.
       - name: Activate the pinned toolchain
         run: rustup show
+      - name: Add the one target this crate actually ships and documents
+        run: rustup target add aarch64-apple-darwin
       - name: Install formatter and linter components
         run: rustup component add rustfmt clippy
       - name: Configure the shared compilation cache
         uses: mozilla/sccache-action@v0.0.11
       - name: Check formatting
         run: cargo fmt --all -- --check
-      # Clippy runs the check pipeline, so it never links a binary and needs
-      # no MLX-C library on this Linux job; the vendored headers drive bindgen.
+      # Clippy runs the check pipeline for the shipped target — the same
+      # aarch64-apple-darwin build docs.rs performs on its Linux machines —
+      # so this lane mirrors the one real non-Mac consumer instead of an
+      # x86-64 Linux configuration nothing uses. It never links, so no MLX-C
+      # library is needed here; the vendored headers drive bindgen.
       - name: Lint with clippy treating warnings as errors
-        run: cargo clippy --all-targets -- -D warnings
-      - name: Build documentation
-        run: cargo doc --no-deps
+        run: cargo clippy --all-targets --target aarch64-apple-darwin -- -D warnings
+      - name: Build documentation as docs.rs does
+        run: cargo doc --no-deps --target aarch64-apple-darwin
 
   zero-config:
     name: Zero-configuration adoption journey
