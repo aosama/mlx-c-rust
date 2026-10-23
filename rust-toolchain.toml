@@ -1,0 +1,6 @@
+[toolchain]
+# Nightly matches the toolchain the bridge was developed and hardened under.
+# The major.minor floor (1.101) is recorded in Cargo.toml; the exact compiler
+# stays pinned here.
+channel = "nightly-2026-10-18"
+profile = "minimal"

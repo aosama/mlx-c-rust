@@ -1,0 +1,7 @@
+[build]
+# Warnings are defects: every Cargo compilation of this crate fails on the
+# first warning instead of letting it scroll past and rot. `build.warnings`
+# scopes the deny to this crate's own code, unlike rustflags = ["-D",
+# "warnings"] which would also hard-fail on warnings emitted by third-party
+# dependencies.
+warnings = "deny"

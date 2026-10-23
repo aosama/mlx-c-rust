@@ -1,0 +1,39 @@
+[package]
+name = "mlx-c-rust"
+version = "0.7.0"
+edition = "2024"
+# The crate version mirrors the vendored MLX-C release it binds (the scheme
+# mlx-sys established): MLX-C 0.7.0 -> crate 0.7.0. Users read the Apple MLX-C
+# version straight off the crate version. Pre-1.0 semantic versioning on both
+# sides makes minor-version breaking changes honest.
+rust-version = "1.101"
+description = "A complete, low-level, policy-free Rust bridge to the public MLX-C API of Apple's MLX array framework for Apple silicon."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/aosama/mlx-c-rust"
+documentation = "https://docs.rs/mlx-c-rust"
+readme = "README.md"
+keywords = ["mlx", "apple-silicon", "machine-learning", "bindings", "gpu"]
+categories = ["api-bindings", "science"]
+exclude = ["vendor/mlx-c/README.md", "vendor/mlx-c/docs"]
+
+[lib]
+name = "mlx_c_rust"
+
+[lints.rust]
+# This crate exists to encapsulate the one unsafe boundary in the workspace:
+# every MLX-C extern call lives here behind owned handles and checked statuses.
+unsafe_code = "allow"
+unused_must_use = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[dependencies]
+thiserror = "2"
+
+[build-dependencies]
+bindgen = "0.73"
+pkg-config = "0.3"
+
+[package.metadata.docs.rs]
+targets = ["aarch64-apple-darwin"]
