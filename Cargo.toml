@@ -14,7 +14,13 @@ documentation = "https://docs.rs/mlx-c-rust"
 readme = "README.md"
 keywords = ["mlx", "apple-silicon", "machine-learning", "bindings", "gpu"]
 categories = ["api-bindings", "science"]
-exclude = ["vendor/mlx-c/README.md", "vendor/mlx-c/docs"]
+exclude = [
+  ".github",
+  ".cargo",
+  "rust-toolchain.toml",
+  "vendor/mlx-c/README.md",
+  "vendor/mlx-c/docs",
+]
 
 [lib]
 name = "mlx_c_rust"
