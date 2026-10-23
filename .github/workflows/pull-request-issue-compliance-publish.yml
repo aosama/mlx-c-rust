@@ -1,0 +1,167 @@
+# Publishes the trusted metadata-only compliance check without the
+# pull_request_target event, which GitHub's default Actions event policy blocks
+# on public repositories (evaluate mode now, enforced 2026-11-02). The
+# workflow_run event always executes the default-branch copy of this file, so
+# pull-request code can never weaken the issue provenance policy; pull-request
+# data enters only through the REST API and is never checked out or executed.
+name: PR issue compliance
+
+on:
+  workflow_run:
+    workflows:
+      - PR issue compliance collection
+    types:
+      - completed
+  workflow_dispatch:
+    inputs:
+      pull_request_number:
+        description: Pull request number to validate
+        required: true
+        type: number
+
+permissions:
+  statuses: write
+  contents: read
+  issues: read
+  pull-requests: read
+
+jobs:
+  publish-compliance-check:
+    name: Validate documented issue
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    concurrency:
+      group: pr-issue-compliance-${{ github.event.workflow_run.head_branch || inputs.pull_request_number }}
+      cancel-in-progress: true
+    steps:
+      # The checkout stays pinned to the trusted default branch; pull-request
+      # authored code is never checked out or executed.
+      - name: Check out trusted compliance policy
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Publish PR issue compliance
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          # GitHub's REST surface intermittently answers 5xx; the default of
+          # zero retries turned those transient blips into published
+          # "failure" commit statuses that block merging for reasons the
+          # pull-request body never caused.
+          retries: 3
+          script: |
+            const path = require("node:path");
+            const { validatePullRequestIssue, isAutomatedPullRequest } = require(
+              path.join(process.env.GITHUB_WORKSPACE, ".github/scripts/pull-request-issue-compliance.js"),
+            );
+
+            const startedAtMilliseconds = Date.now();
+
+            // workflow_run payloads omit the pull_requests entry for fork pull
+            // requests, so resolve the number from the triggering run's head
+            // commit through the association endpoint; dispatch runs carry the
+            // number directly.
+            async function resolvePullRequestNumber() {
+              if (context.eventName === "workflow_dispatch") {
+                return Number(context.payload.inputs.pull_request_number);
+              }
+              const headSha = context.payload.workflow_run.head_sha;
+              const associatedPullRequests = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                commit_sha: headSha,
+              });
+              const repositoryFullName = `${context.repo.owner}/${context.repo.repo}`;
+              const openSameRepositoryPullRequest = associatedPullRequests.data.find((pullRequest) =>
+                pullRequest.state === "open"
+                && pullRequest.base.repo.full_name === repositoryFullName,
+              );
+              return openSameRepositoryPullRequest?.number;
+            }
+
+            const pullRequestNumber = await resolvePullRequestNumber();
+            if (pullRequestNumber === undefined) {
+              core.info("[pr-issue-compliance] status=skipped reason=no_open_pull_request_for_head_commit");
+              return;
+            }
+            core.info(`[pr-issue-compliance] status=start pull_request=${pullRequestNumber}`);
+
+            const { data: pullRequest } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pullRequestNumber,
+            });
+            // Commit statuses are independent of Actions check-suite selection:
+            // a body-edit collector must not supersede the published result.
+            async function publishComplianceStatus(state, description) {
+              await github.rest.repos.createCommitStatus({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                sha: pullRequest.head.sha,
+                context: "PR issue compliance",
+                state,
+                description,
+                target_url: `${process.env.GITHUB_SERVER_URL}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              });
+            }
+
+            try {
+              if (isAutomatedPullRequest(pullRequest.user?.login)) {
+                await publishComplianceStatus("success", "Automated pull request: issue linkage not required");
+                core.info(
+                  `[pr-issue-compliance] status=success reason=automated_pull_request author=${pullRequest.user.login}`,
+                );
+                return;
+              }
+
+              const compliance = await validatePullRequestIssue({
+                pullRequestBody: pullRequest.body,
+                repositoryFullName: `${context.repo.owner}/${context.repo.repo}`,
+                loadIssue: async (issueNumber) => {
+                  const { data: issue } = await github.rest.issues.get({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: issueNumber,
+                  });
+                  return issue;
+                },
+              });
+
+              // Stale closing promises (a closing keyword on an
+              // already-closed issue) are advisory: the linkage itself is
+              // well-formed, so they annotate the run without failing it.
+              for (const complianceWarning of compliance.warnings) {
+                core.warning(complianceWarning);
+              }
+
+              await publishComplianceStatus("success", `Pull request links issue #${compliance.issueNumber}`);
+              core.info(
+                `[pr-issue-compliance] status=success issues=${compliance.linkedIssues.map((linked) => linked.issueNumber).join(",")}`,
+              );
+            } catch (error) {
+              // Infrastructure failures reaching this point — GitHub 5xx after
+              // the step-level retries, or a 403 secondary rate limit the
+              // retry exemptions never retry — are not verdicts about the
+              // pull-request body. Every policy verdict the validator emits is
+              // a plain Error without a status, so any numeric status here is
+              // an API condition and must not publish a blocking "failure"
+              // commit status onto the head commit; the run fails visibly
+              // instead and a re-run publishes the real result.
+              const infrastructureHttpStatus = typeof error?.status === "number" ? error.status : null;
+              if (infrastructureHttpStatus !== null) {
+                core.error(
+                  `[pr-issue-compliance] status=deferred reason=transient_github_error http_status=${infrastructureHttpStatus}`,
+                );
+                core.setFailed(
+                  `Transient GitHub API error (HTTP ${infrastructureHttpStatus}) before a verdict was reached; re-run this workflow to publish the compliance result.`,
+                );
+                return;
+              }
+              await publishComplianceStatus("failure", "Link the pull request to an existing issue; see workflow log");
+              core.setFailed(error.message);
+            } finally {
+              core.info(
+                `[pr-issue-compliance] status=complete elapsed_milliseconds=${Date.now() - startedAtMilliseconds}`,
+              );
+            }

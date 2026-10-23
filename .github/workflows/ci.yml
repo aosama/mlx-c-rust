@@ -113,6 +113,11 @@ jobs:
       # cannot regress it.
       - name: Enforce the per-file size ceiling
         run: cargo xtask source-size
+      # The pull-request issue-compliance policy is pure script with its
+      # tests beside it; running them here keeps the trusted publisher's
+      # policy from drifting between pull requests.
+      - name: Run pull request policy contracts
+        run: node --test --test-reporter=spec .github/scripts/pull-request-issue-compliance.test.js .github/scripts/pull-request-issue-compliance-publish.test.js
       - name: Print compiler cache statistics
         if: ${{ !cancelled() }}
         run: sccache --show-stats

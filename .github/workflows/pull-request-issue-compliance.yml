@@ -1,0 +1,27 @@
+# Low-trust collector for the PR issue compliance policy: the pull_request
+# event always executes the pull request's merge-commit copy of this file, so
+# it must stay a zero-permission no-op that never reads pull-request content.
+# The trusted publisher reacts to its completion from the default branch.
+name: PR issue compliance collection
+
+on:
+  pull_request:
+    types:
+      - opened
+      - edited
+      - reopened
+      - synchronize
+
+permissions: {}
+
+jobs:
+  collect:
+    name: Collect pull-request event
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Report collection
+        env:
+          PR_EVENT_ACTION: ${{ github.event.action }}
+        run: |
+          printf '[pr-issue-compliance-collection] status=complete event=%s\n' "$PR_EVENT_ACTION"
