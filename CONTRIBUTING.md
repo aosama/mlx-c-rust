@@ -73,3 +73,10 @@ keep the unsafe boundary encapsulated (owned handles, checked statuses,
 no raw pointers crossing the public API), reflect any MLX-C surface
 change in `COVERAGE_INVENTORY.md` and the vendored header pin, and
 include no credentials, personal paths, or machine-specific assumptions.
+
+## Releases
+
+Releases follow a written discipline — what decides a version bump,
+which gates a release must pass (including the cold native journey),
+the publish order, and the yank criteria. It lives in
+[RELEASES.md](RELEASES.md).
