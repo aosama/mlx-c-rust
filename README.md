@@ -24,7 +24,9 @@ Early public extraction, versioned to mirror the vendored MLX-C release (crate `
 
 ## Building
 
-Nothing to configure: `cargo add mlx-c-rust`, then `cargo build`. With no environment set, the build script downloads the pinned MLX and MLX-C source releases (SHA-256 verified), compiles them once with CMake, and links against the result; the built prefix caches inside the build directory until `cargo clean`. Requirements: an Apple Silicon Mac, the Rust toolchain pinned in `rust-toolchain.toml`, Clang for bindgen, and `curl`, `tar`, and `cmake` on PATH (a standard developer machine; `brew install cmake` covers the one that is usually missing).
+Nothing to configure: `cargo add mlx-c-rust`, then `cargo build`. With no environment set, the build script's typed native engine downloads the pinned MLX and MLX-C source releases (SHA-256 verified), compiles them once with CMake into a **machine-shared, identity-keyed prefix** (`~/.cache/mlx-c-rust/native/<identity>/`), and links against the result — so the pair compiles once per machine per pin, and every project using the crate reuses it. Requirements: an Apple Silicon Mac, the Rust toolchain pinned in `rust-toolchain.toml`, Clang for bindgen, and `curl`, `tar`, and `cmake` on PATH (a standard developer machine; `brew install cmake` covers the one that is usually missing).
+
+Working in this repository, the same engine is available as typed tooling: `cargo xtask build-native` (add `--force` to recompile) builds the pair up front with live progress, so later builds reuse it in milliseconds.
 
 To link against an MLX-C you provide yourself instead, in first-match order:
 
