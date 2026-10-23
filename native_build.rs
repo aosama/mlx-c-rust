@@ -73,7 +73,7 @@ const COMPLETION_MARKER_DIRECTORY: &str = "complete";
 /// encoding also keeps the checksum comparison's shape independent of any
 /// transitive trait implementation. Byte-for-byte identical to the old
 /// formatting, so prefix identities and pinned checksums compare unchanged.
-fn digest_lowercase_hex(digest_bytes: &[u8]) -> String {
+pub fn digest_lowercase_hex(digest_bytes: &[u8]) -> String {
     const HEX_DIGITS: &[u8; 16] = b"0123456789abcdef";
     let mut hex_characters = String::with_capacity(digest_bytes.len() * 2);
     for &digest_byte in digest_bytes {
