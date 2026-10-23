@@ -157,7 +157,7 @@ checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
 
 [[package]]
 name = "mlx-c-rust"
-version = "0.32.4-alpha.1"
+version = "0.32.4-alpha.2"
 dependencies = [
  "bindgen",
  "pkg-config",
@@ -312,7 +312,7 @@ checksum = "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5"
 
 [[package]]
 name = "xtask"
-version = "0.32.4-alpha.1"
+version = "0.32.4-alpha.2"
 dependencies = [
  "sha2",
 ]

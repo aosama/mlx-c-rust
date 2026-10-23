@@ -4,7 +4,7 @@ name = "mlx-c-rust"
 # stable release lands once early adopters have exercised it. Pre-releases
 # are never resolved by default dependency resolution, so nobody gets an
 # early build accidentally.
-version = "0.32.4-alpha.1"
+version = "0.32.4-alpha.2"
 edition = "2024"
 # The crate version names the MLX RELEASE THE CRATE IS VERIFIED AGAINST —
 # the number users search for and install (the scheme mlx-rs established for
