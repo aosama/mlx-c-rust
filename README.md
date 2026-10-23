@@ -24,14 +24,13 @@ Early public extraction, versioned to mirror the vendored MLX-C release (crate `
 
 ## Building
 
-Requirements: a Rust toolchain (pinned in `rust-toolchain.toml`), Clang for bindgen, and an MLX-C library to link against.
+Nothing to configure: `cargo add mlx-c-rust`, then `cargo build`. With no environment set, the build script downloads the pinned MLX and MLX-C source releases (SHA-256 verified), compiles them once with CMake, and links against the result; the built prefix caches inside the build directory until `cargo clean`. Requirements: an Apple Silicon Mac, the Rust toolchain pinned in `rust-toolchain.toml`, Clang for bindgen, and `curl`, `tar`, and `cmake` on PATH (a standard developer machine; `brew install cmake` covers the one that is usually missing).
 
-Bindgen always runs against the headers vendored under `vendor/mlx-c/` — no network, no system headers. For linking a binary that uses the crate, the build script looks for MLX-C in this order:
+To link against an MLX-C you provide yourself instead, in first-match order:
 
-1. `MLX_C_RUST_MLX_C_PREFIX` — a prefix with `lib/` containing the library and, if needed, `include/`.
-2. `pkg-config mlx-c`.
-
-If neither is found the crate still checks and compiles (documentation builds work); linking a test or binary then reports undefined symbols until MLX-C is provided. Building MLX and MLX-C from source is a CMake build of the upstream repositories; see their documentation.
+1. `MLX_C_RUST_MLX_C_PREFIX` — a prefix whose `lib/` holds the libraries (an embedded rpath means no run-time environment variables).
+2. The standard Homebrew prefixes, after `brew install mlx-c`.
+3. `pkg-config mlx-c`.
 
 ## Versioning
 
@@ -39,7 +38,7 @@ The crate version names the **MLX release it is verified against** (the scheme m
 
 ## Attribution
 
-The fallible-closure error channel — a payload trampoline parking its typed failure in a thread-local slot that the caller's status check prefers over MLX-C's own status error — adopts the pattern used by [mlx-rs](https://github.com/oxiglade/mlx-rs) (MIT OR Apache-2.0). The pattern is adopted; no mlx-rs code is included. MLX and MLX-C are © Apple Inc., MIT licensed.
+The error handling follows the usage pattern MLX-C itself documents — installing a non-terminating handler that records the message before the nonzero status returns, extended with a thread-local slot so payload closures can park their typed failures across the C boundary. MLX and MLX-C are © Apple Inc., MIT licensed.
 
 ## License
 

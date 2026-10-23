@@ -30,14 +30,6 @@
 //! exists precisely so that every MLX-C capability is reachable without
 //! waiting for a wrapper to be written on demand.
 //!
-//! # Attribution
-//!
-//! The fallible-closure error channel — a payload trampoline parking its
-//! typed failure in a thread-local slot that the caller's status check
-//! prefers over MLX-C's own status error — adopts the pattern used by
-//! mlx-rs (MIT OR Apache-2.0). The pattern is adopted; no mlx-rs code is
-//! included.
-//!
 //! # Test placement
 //!
 //! Tests that never touch MLX-C symbols (the error-channel machinery) live
