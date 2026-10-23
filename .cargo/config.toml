@@ -18,30 +18,30 @@ warnings = "deny"
 # the vendored headers with the host's libclang.
 #
 # The bindgen-on-Linux gotcha (diagnosed on the hosted runners docs.rs
-# also uses): the libclang that wins clang-sys's loading search carries
-# defaults that do not describe this parse, and peeling that onion
-# surfaced three different fatalities, one per fix attempt. First the
-# Debian/Ubuntu multiarch include directory (/usr/include/<arch>-linux-gnu)
-# never enters the search path and <stdint.h> dies on
+# also uses) and its structural conclusion. Peeling the onion surfaced
+# three different fatalities, one per fix attempt: first the Debian/Ubuntu
+# multiarch include directory (/usr/include/<arch>-linux-gnu) never enters
+# the libclang's search path and <stdint.h> dies on
 # `bits/libc-header-start.h`; once that directory is supplied, glibc's
 # gnu/stubs.h dies on `gnu/stubs-32.h` because the default triple did not
 # match the 64-bit host; and once the triple is named, the vendor's
-# half.h still gates the float16/bfloat16 slice of the ABI on
-# __aarch64__, so an x86_64 parse silently DROPS symbols like
-# mlx_array_data_bfloat16 that this crate promises to bridge. The build
-# script therefore parses the AARCH64 VIEW on any Linux host — the ABI
-# this crate binds is Apple silicon by definition — while taking header
-# text from the host's installed glibc layout, whenever the multiarch
-# directory exists (which also serves as a Debian-layout detector; macOS
-# and musl hosts keep the default parse):
-#   --target=aarch64-unknown-linux-gnu   (the ABI view: opens the gates)
-#   -I/usr/include/<host-arch>-linux-gnu (host glibc multiarch headers)
-#   -I/usr/include                      (host glibc generic headers)
-# The ARM intrinsic headers the gates include (arm_fp16.h, arm_bf16.h)
-# are compiler-provided in clang's resource directory, so they resolve
-# under the aarch64 triple on any clang. Escape hatch for one-off
-# diagnosis: BINDGEN_EXTRA_CLANG_ARGS appends to what bindgen receives,
-# on any host.
+# half.h still gates the float16/bfloat16 slice of the ABI on __aarch64__,
+# so an x86_64 parse silently DROPS symbols like mlx_array_data_bfloat16
+# this crate promises to bridge — while an aarch64 parse of an x86_64
+# host's glibc is equally incoherent, because that glibc's stubs.h speaks
+# only the x86 family. Conclusion: NO host header set can serve this
+# parse. The build script therefore parses with ONE identity everywhere:
+#   --target=aarch64-apple-darwin    (the ABI this crate binds)
+#   -Xclang -nostdsysteminc          (host system includes dropped; clang's
+#                                     builtin headers kept — -nostdinc
+#                                     would drop float.h/stddef/arm_fp16
+#                                     too, they are builtins, not libc)
+#   -isystem vendor/freestanding     (stdint; opaque FILE; size_t; complex)
+# clang's builtin headers also supply stdbool/stddef/float and the ARM
+# intrinsic headers (arm_fp16.h, arm_bf16.h) the vendor gates include.
+# docs.rs, the Ubuntu lint lane, and every Mac generate byte-identical
+# declarations. Escape hatch for one-off diagnosis:
+# BINDGEN_EXTRA_CLANG_ARGS appends to what bindgen receives, on any host.
 #
 # Linking and tests
 # -----------------

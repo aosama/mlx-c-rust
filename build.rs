@@ -41,40 +41,43 @@ const BINDGEN_TYPE_ALLOWLIST: &str = "mlx_.*";
 /// headers.
 const BRIDGED_INVENTORY_FILE_NAME: &str = "bridged_inventory.rs";
 
-/// Clang arguments that make bindgen's vendored-header parse host-proof on
-/// Linux. Three distinct fatalities surfaced as this lane was proven, each
-/// a different symptom of the same fact: the libclang that wins the
-/// loading search carries defaults that do not describe this parse. First,
-/// the Debian/Ubuntu multiarch include directory never entered the search
-/// path, so the host `<stdint.h>` died on `bits/libc-header-start.h`;
-/// supplying it exposed the second: with the default triple not matching
-/// the 64-bit host, glibc's `gnu/stubs.h` selected the 32-bit stubs and
-/// died on `gnu/stubs-32.h`; naming a 64-bit host triple exposed the third
-/// and deepest: `half.h` gates the float16 and bfloat16 slice of the ABI
-/// on `__aarch64__`, so an x86_64 parse silently DROPS symbols like
-/// `mlx_array_data_bfloat16` that the bridge promises to carry — this
-/// crate binds the Apple silicon ABI, whatever machine documents it. The
-/// parse therefore names the aarch64 view explicitly while taking its
-/// system headers from the host's installed glibc layout — generic
-/// `/usr/include` plus its multiarch directory — a deliberate mixed
-/// fiction: type layout follows the ABI triple, header text follows the
-/// host. The ARM intrinsic headers the gates include (`arm_fp16.h`,
-/// `arm_bf16.h`) are compiler-provided in clang's resource directory
-/// rather than glibc's, so they resolve under the aarch64 triple on any
-/// clang. Hosts without the Debian layout — macOS, where every supported
-/// machine is Apple silicon and clang's default parse already takes the
-/// aarch64 view — keep the defaults. (An Intel Mac would need the same
-/// explicit target; no Intel machine can link this crate in any case.)
-fn linux_host_clang_arguments() -> Vec<String> {
-    let host_multiarch_include_directory =
-        format!("/usr/include/{}-linux-gnu", std::env::consts::ARCH);
-    if !Path::new(&host_multiarch_include_directory).is_dir() {
-        return Vec::new();
-    }
+/// The freestanding stubs that replace host libc in the self-contained
+/// parse; see `self_contained_parse_arguments`.
+const FREESTANDING_HEADERS_DIRECTORY: &str = "vendor/freestanding";
+
+/// Clang arguments giving bindgen ONE parse identity on every host: the
+/// aarch64 Apple-darwin view of the ABI this crate binds, in a
+/// self-contained freestanding environment. Three distinct fatalities
+/// surfaced while proving the Linux lane — each a different symptom of
+/// letting host state describe the parse. First, the host libclang missed
+/// the Debian/Ubuntu multiarch include directory and the host `<stdint.h>`
+/// died on `bits/libc-header-start.h`. Second, the default triple did not
+/// match the 64-bit host, so glibc's `gnu/stubs.h` selected the 32-bit
+/// stubs. Third — the deepest, and invisible until the first two were
+/// fixed — the vendored `half.h` gates the float16 and bfloat16 slice of
+/// the ABI on `__aarch64__`, so any x86_64 parse silently DROPS symbols
+/// like `mlx_array_data_bfloat16` that the bridge promises to carry; and
+/// conversely an aarch64 parse of an x86_64 host's glibc is incoherent,
+/// because that glibc's `stubs.h` speaks only the x86 family. The
+/// conclusion is structural: no host header set can serve this parse.
+/// `--target` names the Apple silicon ABI view; `-nostdsysteminc` drops
+/// every host system include path while KEEPING clang's builtin headers
+/// (`-nostdinc` would drop those too — float.h, stddef.h, and the ARM
+/// intrinsic headers the vendored gates include); the freestanding stubs
+/// vendored beside the headers supply the few libc-owned pieces they
+/// touch (fixed-width integers, an opaque FILE, size_t via stddef, an
+/// empty complex). docs.rs, the Ubuntu lint lane, and every Mac therefore
+/// generate byte-identical declarations, and the bindings stop embedding
+/// host FILE layouts nothing ever used.
+fn self_contained_parse_arguments(freestanding_directory: &Path) -> Vec<String> {
     vec![
-        "--target=aarch64-unknown-linux-gnu".to_owned(),
-        format!("-I{host_multiarch_include_directory}"),
-        "-I/usr/include".to_owned(),
+        "--target=aarch64-apple-darwin".to_owned(),
+        // A frontend-only flag, so it rides behind -Xclang; -nostdinc would
+        // also drop clang's builtin headers (float.h, stddef.h, the ARM
+        // intrinsic headers), which the parse very much keeps.
+        "-Xclang".to_owned(),
+        "-nostdsysteminc".to_owned(),
+        format!("-isystem{}", freestanding_directory.display()),
     ]
 }
 
@@ -83,6 +86,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").ok_or("CARGO_MANIFEST_DIR is unset")?);
     let output_directory = PathBuf::from(env::var_os("OUT_DIR").ok_or("OUT_DIR is unset")?);
     let include_directory = manifest_directory.join(VENDORED_HEADERS_DIRECTORY);
+    let freestanding_directory = manifest_directory.join(FREESTANDING_HEADERS_DIRECTORY);
     let mlx_c_header = include_directory.join("mlx/c/mlx.h");
     if !mlx_c_header.is_file() {
         return Err(format!(
@@ -98,7 +102,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let bindings = bindgen::Builder::default()
         .header(mlx_c_header.to_string_lossy())
         .clang_arg(format!("-I{}", include_directory.display()))
-        .clang_args(linux_host_clang_arguments())
+        .clang_args(self_contained_parse_arguments(&freestanding_directory))
         .allowlist_function(BINDGEN_FUNCTION_ALLOWLIST)
         .allowlist_type(BINDGEN_TYPE_ALLOWLIST)
         .generate_comments(false)
