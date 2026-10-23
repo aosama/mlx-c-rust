@@ -1,0 +1,32 @@
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      # Daily, not weekly: security advisories in the dependency graph
+      # surface every day, and a day-old known-vulnerable dependency is a
+      # day too long for a crate that ships a native build engine.
+      interval: daily
+    open-pull-requests-limit: 5
+    # One grouped daily pull request instead of one pull request per crate:
+    # every separate bump has to clear both required macOS lanes and the
+    # up-to-date-with-base branch rule on its own, which serializes four
+    # green bumps into hours of waiting.
+    groups:
+      rust-dependencies:
+        applies-to: version-updates
+        patterns:
+          - "*"
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: daily
+    open-pull-requests-limit: 5
+    # Dependabot reads the version comment beside each pinned commit SHA
+    # (for example `# v7.0.1`), so the pinned workflow style stays intact
+    # while updates keep arriving as single grouped pull requests.
+    groups:
+      github-actions-dependencies:
+        applies-to: version-updates
+        patterns:
+          - "*"
