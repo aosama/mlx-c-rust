@@ -4,6 +4,16 @@ on:
   push:
     branches: [main]
   pull_request:
+  # The release discipline's cold-native gate: dispatched once per release
+  # with cold-native set, the native lane skips the compiled-pair restore
+  # and proves the checksummed sources download and compile from nothing
+  # on a fresh runner — the zero-configuration adopter's exact journey.
+  workflow_dispatch:
+    inputs:
+      cold-native:
+        description: Skip the compiled-pair restore so the native lane proves the cold journey
+        type: boolean
+        default: false
 
 # Least privilege by default: nothing in this workflow needs write access
 # to the repository. The one job that prunes surplus caches grants itself
@@ -175,6 +185,7 @@ jobs:
       # then; every other push reuses and finishes in seconds.
       - name: Restore the compiled pinned pair
         id: native-pair-cache
+        if: ${{ github.event_name != 'workflow_dispatch' || !inputs.cold-native }}
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           key: native-pair-${{ hashFiles('native_build.rs') }}
