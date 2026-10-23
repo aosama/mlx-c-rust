@@ -40,6 +40,25 @@ jobs:
       - name: Build documentation
         run: cargo doc --no-deps
 
+  zero-config:
+    name: Zero-configuration adoption journey
+    runs-on: macos-latest
+    timeout-minutes: 45
+    env:
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: "true"
+    steps:
+      - uses: actions/checkout@v7
+      - name: Activate the pinned toolchain
+        run: rustup show
+      - name: Configure the shared compilation cache
+        uses: mozilla/sccache-action@v0.0.11
+      # Nothing else: this job proves the adopter experience — the build
+      # script downloads, verifies, and compiles the pinned MLX and MLX-C
+      # sources on its own, then links and runs the test suite.
+      - name: Build and test with no configuration at all
+        run: cargo test -- --test-threads=1
+
   test:
     name: Link and run tests against a real MLX-C
     runs-on: macos-latest
