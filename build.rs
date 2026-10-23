@@ -15,7 +15,9 @@
 //! (this crate's own code, no shell), which downloads the checksum-verified
 //! pinned sources and compiles them once into that same shared prefix. The
 //! pair therefore compiles once per machine per pin, and every later
-//! consumer reuses it.
+//! consumer reuses it. Non-mac hosts never enter the ladder at all: the
+//! link line it emits is Apple-framework-shaped end to end, so those hosts
+//! get a warning instead and compile or document without linking.
 
 #[path = "native_build.rs"]
 mod native_build;
@@ -39,11 +41,52 @@ const BINDGEN_TYPE_ALLOWLIST: &str = "mlx_.*";
 /// headers.
 const BRIDGED_INVENTORY_FILE_NAME: &str = "bridged_inventory.rs";
 
+/// The freestanding stubs that replace host libc in the self-contained
+/// parse; see `self_contained_parse_arguments`.
+const FREESTANDING_HEADERS_DIRECTORY: &str = "vendor/freestanding";
+
+/// Clang arguments giving bindgen ONE parse identity on every host: the
+/// aarch64 Apple-darwin view of the ABI this crate binds, in a
+/// self-contained freestanding environment. Three distinct fatalities
+/// surfaced while proving the Linux lane — each a different symptom of
+/// letting host state describe the parse. First, the host libclang missed
+/// the Debian/Ubuntu multiarch include directory and the host `<stdint.h>`
+/// died on `bits/libc-header-start.h`. Second, the default triple did not
+/// match the 64-bit host, so glibc's `gnu/stubs.h` selected the 32-bit
+/// stubs. Third — the deepest, and invisible until the first two were
+/// fixed — the vendored `half.h` gates the float16 and bfloat16 slice of
+/// the ABI on `__aarch64__`, so any x86_64 parse silently DROPS symbols
+/// like `mlx_array_data_bfloat16` that the bridge promises to carry; and
+/// conversely an aarch64 parse of an x86_64 host's glibc is incoherent,
+/// because that glibc's `stubs.h` speaks only the x86 family. The
+/// conclusion is structural: no host header set can serve this parse.
+/// `--target` names the Apple silicon ABI view; `-nostdsysteminc` drops
+/// every host system include path while KEEPING clang's builtin headers
+/// (`-nostdinc` would drop those too — float.h, stddef.h, and the ARM
+/// intrinsic headers the vendored gates include); the freestanding stubs
+/// vendored beside the headers supply the few libc-owned pieces they
+/// touch (fixed-width integers, an opaque FILE, size_t via stddef, an
+/// empty complex). docs.rs, the Ubuntu lint lane, and every Mac therefore
+/// generate byte-identical declarations, and the bindings stop embedding
+/// host FILE layouts nothing ever used.
+fn self_contained_parse_arguments(freestanding_directory: &Path) -> Vec<String> {
+    vec![
+        "--target=aarch64-apple-darwin".to_owned(),
+        // A frontend-only flag, so it rides behind -Xclang; -nostdinc would
+        // also drop clang's builtin headers (float.h, stddef.h, the ARM
+        // intrinsic headers), which the parse very much keeps.
+        "-Xclang".to_owned(),
+        "-nostdsysteminc".to_owned(),
+        format!("-isystem{}", freestanding_directory.display()),
+    ]
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let manifest_directory =
         PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").ok_or("CARGO_MANIFEST_DIR is unset")?);
     let output_directory = PathBuf::from(env::var_os("OUT_DIR").ok_or("OUT_DIR is unset")?);
     let include_directory = manifest_directory.join(VENDORED_HEADERS_DIRECTORY);
+    let freestanding_directory = manifest_directory.join(FREESTANDING_HEADERS_DIRECTORY);
     let mlx_c_header = include_directory.join("mlx/c/mlx.h");
     if !mlx_c_header.is_file() {
         return Err(format!(
@@ -59,6 +102,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let bindings = bindgen::Builder::default()
         .header(mlx_c_header.to_string_lossy())
         .clang_arg(format!("-I{}", include_directory.display()))
+        .clang_args(self_contained_parse_arguments(&freestanding_directory))
         .allowlist_function(BINDGEN_FUNCTION_ALLOWLIST)
         .allowlist_type(BINDGEN_TYPE_ALLOWLIST)
         .generate_comments(false)
@@ -71,13 +115,32 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-/// Emits the linker instructions for an MLX-C library. The ladder, first
-/// match wins: the prefix variable, the machine-shared identity-keyed prefix
-/// (building it if absent — the zero-configuration default), Homebrew, and
-/// pkg-config. When nothing resolves, a warning is printed and no link flags
-/// are emitted: library compilation and documentation builds still work, and
-/// the failure surfaces only when a consumer links a binary.
+/// Emits the linker instructions for an MLX-C library. Non-mac hosts stop
+/// at a warning before any rung: the link line this ladder produces — a
+/// `libmlxc.dylib` plus Apple frameworks — could never work there, so even
+/// an explicit prefix variable would only yield unusable flags. On macOS,
+/// the ladder, first match wins: the prefix variable, the machine-shared
+/// identity-keyed prefix (building it if absent — the zero-configuration
+/// default), Homebrew, and pkg-config. When nothing resolves, a warning is
+/// printed and no link flags are emitted: library compilation and
+/// documentation builds still work, and the failure surfaces only when a
+/// consumer links a binary.
 fn emit_link_instructions() {
+    if !cfg!(target_os = "macos") {
+        // The pinned pair compiles MLX, which needs Apple's Metal stack: a
+        // non-mac host can never provide it, and the dylib-plus-frameworks
+        // link line below has no meaning there — including for an explicit
+        // prefix variable. Documentation and check lanes never link, so the
+        // ladder stops here with a warning instead of burning build minutes
+        // (docs.rs builds are time-boxed) on a doomed CMake attempt.
+        // Linking consumers are on Apple silicon by definition.
+        println!(
+            "cargo:warning=no MLX-C library can be built on this host operating system; \
+             the crate compiles and documents, but linking a binary that uses it needs \
+             an Apple silicon Mac"
+        );
+        return;
+    }
     if let Some(prefix) = prefix_from_environment() {
         emit_prefix_link_flags(&prefix);
         return;

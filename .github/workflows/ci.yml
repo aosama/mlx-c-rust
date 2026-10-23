@@ -31,12 +31,12 @@ env:
 
 jobs:
   check:
-    name: Lint and document on the shipped target
-    runs-on: macos-latest
-    # A cache miss makes the build script's library ladder compile the pinned
-    # pair inline before linting can start, so allow the same headroom the
-    # native journey needs.
-    timeout-minutes: 30
+    name: Lint and document exactly as docs.rs builds it
+    runs-on: ubuntu-latest
+    # The build script skips the native ladder on non-mac hosts, so this
+    # lane never pays a native compile; the cap only covers dependency
+    # compilation.
+    timeout-minutes: 20
     env:
       RUSTC_WRAPPER: sccache
     steps:
@@ -45,6 +45,13 @@ jobs:
         with:
           fetch-depth: 1
           persist-credentials: false
+      - name: Install libclang and the C headers for bindgen
+        # bindgen only parses the vendored headers, but its clang still
+        # pulls in the host <stdint.h>. The build script supplies the
+        # distribution's multiarch include directory explicitly (some
+        # libclang builds never add it themselves); this step provides the
+        # headers both pieces need.
+        run: sudo apt-get update && sudo apt-get install -y libclang-dev libc6-dev
       # `rustup show` installs the toolchain pinned by rust-toolchain.toml.
       - name: Activate the pinned toolchain
         run: rustup show
@@ -52,12 +59,12 @@ jobs:
         run: rustup target add aarch64-apple-darwin
       - name: Install formatter and linter components
         run: rustup component add rustfmt clippy
-      # Pin the sccache directory explicitly: workflow env values cannot
-      # expand $HOME, and the default must be known for the cache restore
-      # and save steps below to point at the same directory the server
-      # writes.
+      # The sccache directory is pinned explicitly, under the same
+      # ~/.cache/mlx-c-rust prefix the native pair uses, so the cache
+      # restore and save steps below point at exactly what the server
+      # writes on every host operating system.
       - name: Pin the sccache directory
-        run: printf 'SCCACHE_DIR=%s\n' "$HOME/Library/Caches/mlx-c-rust/sccache" >> "$GITHUB_ENV"
+        run: printf 'SCCACHE_DIR=%s\n' "$HOME/.cache/mlx-c-rust/sccache" >> "$GITHUB_ENV"
       - name: Install sccache
         uses: mozilla/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       # Dependency downloads (the crates.io registry and git checkouts),
@@ -73,16 +80,6 @@ jobs:
             ~/.cargo/git
           key: mlx-c-rust-v1-cargo-downloads-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
           restore-keys: mlx-c-rust-v1-cargo-downloads-${{ runner.os }}-${{ runner.arch }}-
-      # The build script resolves the machine-shared native prefix through its
-      # discovery ladder; restoring the pair the native job compiled turns that
-      # resolution into an instant reuse instead of a cold C++ compile inside
-      # build.rs.
-      - name: Restore the compiled pinned pair
-        id: native-pair-cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          key: native-pair-${{ hashFiles('native_build.rs') }}
-          path: ~/.cache/mlx-c-rust/native
       # The compiler cache on the directory backend (no SCCACHE_GHA_ENABLED),
       # keyed on the dependency graph — not github.sha — so the same graph
       # restores across commits; sccache is content-addressed and never
@@ -91,7 +88,7 @@ jobs:
         id: sccache-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/Library/Caches/mlx-c-rust/sccache
+          path: ~/.cache/mlx-c-rust/sccache
           key: mlx-c-rust-v1-sccache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
           restore-keys: |
             mlx-c-rust-v1-sccache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}-
@@ -99,11 +96,11 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
       # Clippy runs the check pipeline for the shipped aarch64-apple-darwin
-      # target — the one real consumer configuration. This lane runs on the
-      # macOS runner because its Xcode clang parses the vendored headers with
-      # the same Apple SDK headers local development uses; the Ubuntu lane's
-      # glibc header layout broke bindgen there, so Linux can return once
-      # system-header resolution works on that runner. Nothing links here.
+      # target on the Linux runner — the same host class and cross-target
+      # docs.rs builds with — so this lane is the documentation consumer's
+      # journey proven before publish, not a mirror of it. The build script
+      # passes bindgen the multiarch include directory this host needs;
+      # nothing links here.
       - name: Lint with clippy treating warnings as errors
         run: cargo clippy --all-targets --target aarch64-apple-darwin -- -D warnings
       - name: Build documentation for the docs.rs target
@@ -129,12 +126,6 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
           key: mlx-c-rust-v1-cargo-downloads-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
-      - name: Save the compiled pinned pair
-        if: ${{ !cancelled() && steps.native-pair-cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          key: native-pair-${{ hashFiles('native_build.rs') }}
-          path: ~/.cache/mlx-c-rust/native
       # Default-branch-only, mirroring the astronomical lane: pull requests
       # restore from the default branch anyway, so a pull-request save is a
       # ref-scoped duplicate burning the repository cache budget.
@@ -142,7 +133,7 @@ jobs:
         if: ${{ !cancelled() && github.ref_name == github.event.repository.default_branch && steps.sccache-cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/Library/Caches/mlx-c-rust/sccache
+          path: ~/.cache/mlx-c-rust/sccache
           key: mlx-c-rust-v1-sccache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
 
   native:
@@ -165,7 +156,7 @@ jobs:
       - name: Activate the pinned toolchain
         run: rustup show
       - name: Pin the sccache directory
-        run: printf 'SCCACHE_DIR=%s\n' "$HOME/Library/Caches/mlx-c-rust/sccache" >> "$GITHUB_ENV"
+        run: printf 'SCCACHE_DIR=%s\n' "$HOME/.cache/mlx-c-rust/sccache" >> "$GITHUB_ENV"
       - name: Install sccache
         uses: mozilla/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       - name: Restore cargo downloads
@@ -192,7 +183,7 @@ jobs:
         id: sccache-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/Library/Caches/mlx-c-rust/sccache
+          path: ~/.cache/mlx-c-rust/sccache
           key: mlx-c-rust-v1-sccache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
           restore-keys: |
             mlx-c-rust-v1-sccache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}-
@@ -224,7 +215,7 @@ jobs:
         if: ${{ !cancelled() && github.ref_name == github.event.repository.default_branch && steps.sccache-cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/Library/Caches/mlx-c-rust/sccache
+          path: ~/.cache/mlx-c-rust/sccache
           key: mlx-c-rust-v1-sccache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
       # Surplus generations (an old lockfile key, an oversize sccache entry)
       # push the repository past GitHub's cache budget, and eviction then

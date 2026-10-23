@@ -6,6 +6,54 @@
 # dependencies.
 warnings = "deny"
 
+# How targets work in this repository
+# -----------------------------------
+# The crate ships exactly one rustc target: aarch64-apple-darwin (the one
+# Apple silicon configuration the README and docs.rs document). Build
+# scripts are the exception every host must remember: `build.rs` (and its
+# `native_build.rs` module) compiles for and RUNS ON THE HOST, while the
+# crate code it prepares targets aarch64-apple-darwin. That is why
+# `cargo clippy --all-targets --target aarch64-apple-darwin` works on any
+# 64-bit host: Rust codegen crosses to Apple silicon, but bindgen parses
+# the vendored headers with the host's libclang.
+#
+# The bindgen-on-Linux gotcha (diagnosed on the hosted runners docs.rs
+# also uses) and its structural conclusion. Peeling the onion surfaced
+# three different fatalities, one per fix attempt: first the Debian/Ubuntu
+# multiarch include directory (/usr/include/<arch>-linux-gnu) never enters
+# the libclang's search path and <stdint.h> dies on
+# `bits/libc-header-start.h`; once that directory is supplied, glibc's
+# gnu/stubs.h dies on `gnu/stubs-32.h` because the default triple did not
+# match the 64-bit host; and once the triple is named, the vendor's
+# half.h still gates the float16/bfloat16 slice of the ABI on __aarch64__,
+# so an x86_64 parse silently DROPS symbols like mlx_array_data_bfloat16
+# this crate promises to bridge — while an aarch64 parse of an x86_64
+# host's glibc is equally incoherent, because that glibc's stubs.h speaks
+# only the x86 family. Conclusion: NO host header set can serve this
+# parse. The build script therefore parses with ONE identity everywhere:
+#   --target=aarch64-apple-darwin    (the ABI this crate binds)
+#   -Xclang -nostdsysteminc          (host system includes dropped; clang's
+#                                     builtin headers kept — -nostdinc
+#                                     would drop float.h/stddef/arm_fp16
+#                                     too, they are builtins, not libc)
+#   -isystem vendor/freestanding     (stdint; opaque FILE; size_t; complex)
+# clang's builtin headers also supply stdbool/stddef/float and the ARM
+# intrinsic headers (arm_fp16.h, arm_bf16.h) the vendor gates include.
+# docs.rs, the Ubuntu lint lane, and every Mac generate byte-identical
+# declarations. Escape hatch for one-off diagnosis:
+# BINDGEN_EXTRA_CLANG_ARGS appends to what bindgen receives, on any host.
+#
+# Linking and tests
+# -----------------
+# Compilation and documentation builds succeed on any host (the build
+# script's link ladder stops with a warning on non-mac hosts). Test
+# binaries are the one thing that must LINK an MLX-C library, discovered
+# through MLX_C_RUST_MLX_C_PREFIX=<prefix> or `pkg-config mlx-c`; build it
+# once per machine with `cargo xtask build-native`. Tests run SERIALIZED —
+# `cargo test -- --test-threads=1` — because MLX's default stream, default
+# device, and the installed error handler are process-global state; the
+# `native-test` alias below carries that flag for you.
+
 [alias]
 # Repository tooling runs as typed Rust through the xtask pattern. The
 # subcommands: `cargo xtask build-native [--force]` compiles the pinned
@@ -20,3 +68,13 @@ warnings = "deny"
 # activates the .githooks gates for a clone. The engine is the shared
 # native_build.rs module; there is no shell anywhere in the pipeline.
 xtask = "run -p xtask --"
+# The whole local gate in one command: the same fmt + clippy + doc +
+# size-ceiling pass the Ubuntu lane runs, minus the platform-specific
+# bindgen behavior (a macOS host needs none of the Linux arguments above).
+verify = "xtask verify"
+# Tests need the linked MLX-C library (see "Linking and tests" above) and
+# must serialize on MLX's process-global state. Extra words you append go
+# to the test binary, so filters work: `cargo native-test should_clone`.
+# For cargo-LEVEL flags use the full `cargo test ... -- --test-threads=1`
+# form — an alias already consumed the `--` separator.
+native-test = "test -- --test-threads=1"
