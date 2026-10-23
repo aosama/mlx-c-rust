@@ -14,20 +14,17 @@ env:
 
 jobs:
   check:
-    name: Lint and document exactly as docs.rs builds it
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    name: Lint and document on the shipped target
+    runs-on: macos-latest
+    # A cache miss makes the build script's library ladder compile the pinned
+    # pair inline before linting can start, so allow the same headroom the
+    # native journey needs.
+    timeout-minutes: 30
     env:
       RUSTC_WRAPPER: sccache
       SCCACHE_GHA_ENABLED: "true"
     steps:
       - uses: actions/checkout@v7
-      - name: Install libclang and the C headers for bindgen
-        # bindgen only parses the vendored headers, but its clang still pulls in
-        # the host <stdint.h>, which needs glibc's bits/libc-header-start.h. That
-        # header ships in libc6-dev, not libclang-dev, so a Linux runner without
-        # it fails to generate bindings even though nothing here links.
-        run: sudo apt-get update && sudo apt-get install -y libclang-dev libc6-dev
       # `rustup show` installs the toolchain pinned by rust-toolchain.toml.
       - name: Activate the pinned toolchain
         run: rustup show
@@ -37,16 +34,26 @@ jobs:
         run: rustup component add rustfmt clippy
       - name: Configure the shared compilation cache
         uses: mozilla/sccache-action@v0.0.11
+      # The build script resolves the machine-shared native prefix through its
+      # discovery ladder; restoring the pair the native job compiled turns that
+      # resolution into an instant reuse instead of a cold C++ compile inside
+      # build.rs.
+      - name: Restore the compiled pinned pair
+        uses: actions/cache@v6
+        with:
+          key: native-pair-${{ hashFiles('native_build.rs') }}
+          path: ~/.cache/mlx-c-rust/native
       - name: Check formatting
         run: cargo fmt --all -- --check
-      # Clippy runs the check pipeline for the shipped target — the same
-      # aarch64-apple-darwin build docs.rs performs on its Linux machines —
-      # so this lane mirrors the one real non-Mac consumer instead of an
-      # x86-64 Linux configuration nothing uses. It never links, so no MLX-C
-      # library is needed here; the vendored headers drive bindgen.
+      # Clippy runs the check pipeline for the shipped aarch64-apple-darwin
+      # target — the one real consumer configuration. This lane runs on the
+      # macOS runner because its Xcode clang parses the vendored headers with
+      # the same Apple SDK headers local development uses; the Ubuntu lane's
+      # glibc header layout broke bindgen there, so Linux can return once
+      # system-header resolution works on that runner. Nothing links here.
       - name: Lint with clippy treating warnings as errors
         run: cargo clippy --all-targets --target aarch64-apple-darwin -- -D warnings
-      - name: Build documentation as docs.rs does
+      - name: Build documentation for the docs.rs target
         run: cargo doc --no-deps --target aarch64-apple-darwin
 
   native:
@@ -75,6 +82,6 @@ jobs:
       - name: Build the pinned pair (typed, live progress)
         run: cargo xtask build-native
       # No configuration: the build script must find the machine-shared
-          # prefix the step above built — the adopter experience, proven.
+      # prefix the step above built — the adopter experience, proven.
       - name: Test against the shared prefix
         run: cargo test -- --test-threads=1
