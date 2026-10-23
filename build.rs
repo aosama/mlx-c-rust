@@ -243,8 +243,12 @@ fn homebrew_prefix_with_mlxc() -> Option<PathBuf> {
 
 /// Emits the link flags for a prefix whose `lib` holds the libraries: the
 /// two dylibs plus an embedded rpath (their install names are `@rpath/...`
-/// and they carry their own framework dependencies), or the static pair with
-/// the frameworks MLX requires.
+/// and they carry their own framework dependencies), or the static pair
+/// with everything MLX needs spelled out — the jaccl acceleration archive
+/// MLX v0.32.4 links as its own library, the Apple frameworks, and the
+/// C++ runtime the dylibs used to carry transitively. Order matters for
+/// archives: mlxc references mlx, mlx references jaccl, and the linker
+/// resolves left to right.
 fn emit_prefix_link_flags(prefix: &Path) {
     let library_directory = prefix.join("lib");
     println!(
@@ -261,9 +265,11 @@ fn emit_prefix_link_flags(prefix: &Path) {
     } else {
         println!("cargo:rustc-link-lib=static=mlxc");
         println!("cargo:rustc-link-lib=static=mlx");
+        println!("cargo:rustc-link-lib=static=jaccl");
         for framework in ["Metal", "Foundation", "QuartzCore", "Accelerate"] {
             println!("cargo:rustc-link-lib=framework={framework}");
         }
+        println!("cargo:rustc-link-lib=dylib=c++");
     }
 }
 

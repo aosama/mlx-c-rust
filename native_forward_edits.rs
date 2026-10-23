@@ -28,9 +28,10 @@ pub struct ForwardSourceEdit {
     pub drop_with: &'static str,
 }
 
-pub const MLX_C_FORWARD_SOURCE_EDITS: &[ForwardSourceEdit] = &[ForwardSourceEdit {
-    path: "mlx/c/ops.cpp",
-    find: r#"        mlx::core::gather_qmm(
+pub const MLX_C_FORWARD_SOURCE_EDITS: &[ForwardSourceEdit] = &[
+    ForwardSourceEdit {
+        path: "mlx/c/ops.cpp",
+        find: r#"        mlx::core::gather_qmm(
             mlx_array_get_(x),
             mlx_array_get_(w),
             mlx_array_get_(scales),
@@ -46,7 +47,7 @@ pub const MLX_C_FORWARD_SOURCE_EDITS: &[ForwardSourceEdit] = &[ForwardSourceEdit
             (bits.has_value ? std::make_optional<int>(bits.value)
                             : std::nullopt),
             std::string(mode),"#,
-    replacement: r#"        mlx::core::gather_qmm(
+        replacement: r#"        mlx::core::gather_qmm(
             mlx_array_get_(x),
             mlx_array_get_(w),
             mlx_array_get_(scales),
@@ -63,18 +64,43 @@ pub const MLX_C_FORWARD_SOURCE_EDITS: &[ForwardSourceEdit] = &[ForwardSourceEdit
                             : std::nullopt),
             std::string(mode),
             std::nullopt,"#,
-    drop_with: "the MLX-C release pairing with MLX v0.32.4, whose \
+        drop_with: "the MLX-C release pairing with MLX v0.32.4, whose \
                     gather_qmm call gains the global_scale parameter this \
                     edit bridges over",
-}];
+    },
+    ForwardSourceEdit {
+        path: "CMakeLists.txt",
+        find: r#"if(MLX_C_USE_SYSTEM_MLX)
+  find_package(MLX REQUIRED)"#,
+        replacement: r#"if(MLX_C_USE_SYSTEM_MLX)
+  # The installed static MLX package's targets reference jaccl::jaccl in
+  # their link interface without loading the jaccl package themselves, so
+  # the consumer must resolve it first or find_package(MLX) dies at
+  # set_target_properties on a missing target.
+  find_package(jaccl REQUIRED)
+  find_package(MLX REQUIRED)"#,
+        drop_with: "an MLX or MLX-C release whose system-MLX packaging \
+                    resolves jaccl's imported target itself",
+    },
+];
 
 /// Applies the forward edit set to the extracted MLX-C tree. Idempotent: a
 /// retry over sources edited by a previous attempt recognizes the
 /// replacement and moves on, so a failed later step never wedges the
 /// working directory.
 pub fn apply_forward_source_edits(mlx_c_directory: &std::path::Path) -> Option<()> {
-    for forward_edit in MLX_C_FORWARD_SOURCE_EDITS {
-        let edited_file = mlx_c_directory.join(forward_edit.path);
+    apply_edit_set(MLX_C_FORWARD_SOURCE_EDITS, mlx_c_directory)
+}
+
+/// The counting rule over any edit set and any root directory; the engine
+/// entry point delegates over the real set, and the contract tests drive
+/// synthetic sets through the same rule.
+pub fn apply_edit_set(
+    edit_set: &[ForwardSourceEdit],
+    root_directory: &std::path::Path,
+) -> Option<()> {
+    for forward_edit in edit_set {
+        let edited_file = root_directory.join(forward_edit.path);
         let source_content = match std::fs::read_to_string(&edited_file) {
             Ok(read_content) => read_content,
             Err(read_error) => {
@@ -87,13 +113,16 @@ pub fn apply_forward_source_edits(mlx_c_directory: &std::path::Path) -> Option<(
         };
         let find_occurrences = source_content.matches(forward_edit.find).count();
         let replacement_occurrences = source_content.matches(forward_edit.replacement).count();
-        // Replacement-first, because this set's replacements CONTAIN their
-        // find text (the find block plus an inserted line): over an
-        // already-edited tree the find text still matches once, nested
-        // inside the replacement, and a find-first check would re-apply the
-        // edit into that nested site on every retry, corrupting the call a
-        // little more each time.
-        if replacement_occurrences == 1 && find_occurrences == 1 {
+        // The idempotency rule is shape-aware, computed rather than
+        // configured: when a replacement CONTAINS its find text (the find
+        // block plus inserted lines), an already-edited tree still matches
+        // find exactly once — nested inside the replacement; when it does
+        // not, the applied state shows find zero times. Anything else means
+        // the pinned sources drifted, and the build says so loudly instead
+        // of editing a moved target or double-applying into a nested site.
+        let applied_find_occurrences =
+            usize::from(forward_edit.replacement.contains(forward_edit.find));
+        if replacement_occurrences == 1 && find_occurrences == applied_find_occurrences {
             // Already applied by a previous attempt over the same extracted
             // tree; the edit set is idempotent by design.
             continue;
