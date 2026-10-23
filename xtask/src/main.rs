@@ -6,12 +6,22 @@
 #[path = "../../native_build.rs"]
 mod native_build;
 
+mod cache_prune;
+mod hooks;
+mod repository;
+mod source_size;
+mod verify;
+
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     match arguments.first().map(String::as_str) {
         Some("build-native") => build_native(arguments.get(1..).unwrap_or(&[])),
+        Some("source-size") => source_size::run(arguments.get(1..).unwrap_or(&[])),
+        Some("verify") => verify::run(),
+        Some("prune-caches") => cache_prune::run(arguments.get(1..).unwrap_or(&[])),
+        Some("install-hooks") => hooks::install(),
         Some("--version") | Some("version") => {
             println!("xtask {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
@@ -20,7 +30,16 @@ fn main() -> ExitCode {
             eprintln!(
                 "usage: cargo xtask <command>\n\ncommands:\n  \
                  build-native [--force]  Compile the pinned MLX and MLX-C pair into the \
-                 machine-shared prefix (reuses an existing build; --force recompiles)."
+                 machine-shared prefix (reuses an existing build; --force recompiles).\n  \
+                 source-size [--staged] Enforce the per-file line ceiling on owned code \
+                 files (--staged inspects only the index; default scans the repository).\n  \
+                 verify                 Run the continuous-integration lint lane locally: \
+                 size ceiling, formatting, clippy, documentation.\n  \
+                 prune-caches [--dry-run] [--repo owner/name]\n \
+                 \x20                       Delete surplus GitHub Actions cache generations \
+                 so the repository stays under its cache budget.\n  \
+                 install-hooks           Point git at .githooks so the pre-commit and \
+                 pre-push gates are active for this clone."
             );
             ExitCode::FAILURE
         }

@@ -7,11 +7,16 @@
 warnings = "deny"
 
 [alias]
-# Repository tooling runs as typed Rust through the xtask pattern. The one
-# subcommand today: `cargo xtask build-native [--force]` compiles the pinned
+# Repository tooling runs as typed Rust through the xtask pattern. The
+# subcommands: `cargo xtask build-native [--force]` compiles the pinned
 # MLX and MLX-C pair into the machine-shared identity-keyed prefix under
-# ~/.cache/mlx-c-rust/native/<identity>/prefix — the same prefix the crate's
-# build script reads — so the pair compiles once per machine per pin and
-# every consumer reuses it. The engine is the shared native_build.rs module;
-# there is no shell anywhere in the pipeline.
+# ~/.cache/mlx-c-rust/native/<identity>/prefix — the same prefix the
+# crate's build script reads — so the pair compiles once per machine per
+# pin and every consumer reuses it; `cargo xtask source-size [--staged]`
+# enforces the AGENTS.md per-file line ceiling; `cargo xtask verify` runs
+# the continuous-integration lint lane locally (what the pre-push hook
+# gates on); `cargo xtask prune-caches` keeps GitHub Actions cache
+# families under the repository cache budget; `cargo xtask install-hooks`
+# activates the .githooks gates for a clone. The engine is the shared
+# native_build.rs module; there is no shell anywhere in the pipeline.
 xtask = "run -p xtask --"
