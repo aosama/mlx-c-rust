@@ -12,7 +12,7 @@ fixes ride as patch bumps (see the Versioning section of the README).
 
 | Change | Version | Extra obligation |
 |---|---|---|
-| Defect fix in the bridge (safety, wrong semantics, leak) | Patch (`0.32.3` → `0.32.4`) | Release notes state whether the unsafe boundary was touched |
+| Defect fix in the bridge (safety, wrong semantics, leak) | Patch (`0.32.4` → `0.32.5`) | Release notes state whether the unsafe boundary was touched |
 | New bindings for symbols already in the vendored headers | Patch | `COVERAGE_INVENTORY.md` updated |
 | MLX-C header pin bump within the same MLX release | Patch | Inventory note; checksums enforced by `native_build.rs` |
 | Verification against a new MLX release | Version rides MLX (`0.33.0-alpha.1` …) | The native cache key changes with the pin, so the cold journey proves itself exactly then |

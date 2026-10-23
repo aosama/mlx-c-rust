@@ -11,7 +11,7 @@ edition = "2024"
 # user-facing crates; only internal sys layers version by MLX-C). MLX-C is
 # the carrier for the C bridge, not the pace-setter: this release binds the
 # MLX-C v0.7.0 headers, carried forward to MLX v0.32.4 by this repository's
-# reviewed bridge adaptations (the forward edit set in native_build.rs),
+# reviewed bridge adaptations (the forward edit set in native_forward_edits.rs),
 # until an MLX-C release pairs with that MLX. The bound pair is recorded
 # here, in the README, and in COVERAGE_INVENTORY.md. Our own fixes ride as
 # patch bumps; an MLX-C surface change within the same MLX release also

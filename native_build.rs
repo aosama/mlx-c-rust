@@ -47,115 +47,14 @@ const PINNED_TARBALL_BASE_URL: &str = "https://github.com";
 /// old way orphan it exactly like a pin bump would.
 const PINNED_PAIR_BUILD_RECIPE: &str = "recipe-3-forward-edits";
 
-/// One reviewed forward adaptation of the pinned MLX-C sources to the
-/// pinned MLX, carried until an MLX-C release pairs with that MLX (see
-/// `drop_with`). C++-side only: the C surface this crate binds is
-/// untouched, and COVERAGE_INVENTORY.md's pairing note mirrors this set.
-struct ForwardSourceEdit {
-    /// Path of the edited file, relative to the extracted MLX-C tree.
-    path: &'static str,
-    /// The exact text to find. It must occur exactly once — or, on a retry
-    /// over already-edited sources, exactly zero times with the replacement
-    /// present once — so a drifted upstream fails the build loudly instead
-    /// of editing the wrong site.
-    find: &'static str,
-    /// The replacement text.
-    replacement: &'static str,
-    /// The MLX-C release that makes this edit droppable; each MLX-C release
-    /// reconciles this set.
-    drop_with: &'static str,
-}
+/// The forward edit set this engine applies to the extracted MLX-C tree
+/// between extraction and configure. It lives in its own self-contained,
+/// std-only module so the test tree can exercise it without dragging the
+/// engine along.
+#[path = "native_forward_edits.rs"]
+mod native_forward_edits;
 
-const MLX_C_FORWARD_SOURCE_EDITS: &[ForwardSourceEdit] = &[ForwardSourceEdit {
-    path: "mlx/c/ops.cpp",
-    find: r#"        mlx::core::gather_qmm(
-            mlx_array_get_(x),
-            mlx_array_get_(w),
-            mlx_array_get_(scales),
-            (biases.ctx ? std::make_optional(mlx_array_get_(biases))
-                        : std::nullopt),
-            (lhs_indices.ctx ? std::make_optional(mlx_array_get_(lhs_indices))
-                             : std::nullopt),
-            (rhs_indices.ctx ? std::make_optional(mlx_array_get_(rhs_indices))
-                             : std::nullopt),
-            transpose,
-            (group_size.has_value ? std::make_optional<int>(group_size.value)
-                                  : std::nullopt),
-            (bits.has_value ? std::make_optional<int>(bits.value)
-                            : std::nullopt),
-            std::string(mode),"#,
-    replacement: r#"        mlx::core::gather_qmm(
-            mlx_array_get_(x),
-            mlx_array_get_(w),
-            mlx_array_get_(scales),
-            (biases.ctx ? std::make_optional(mlx_array_get_(biases))
-                        : std::nullopt),
-            (lhs_indices.ctx ? std::make_optional(mlx_array_get_(lhs_indices))
-                             : std::nullopt),
-            (rhs_indices.ctx ? std::make_optional(mlx_array_get_(rhs_indices))
-                             : std::nullopt),
-            transpose,
-            (group_size.has_value ? std::make_optional<int>(group_size.value)
-                                  : std::nullopt),
-            (bits.has_value ? std::make_optional<int>(bits.value)
-                            : std::nullopt),
-            std::string(mode),
-            std::nullopt,"#,
-    drop_with: "the MLX-C release pairing with MLX v0.32.4, whose \
-                    gather_qmm call gains the global_scale parameter this \
-                    edit bridges over",
-}];
-
-/// Applies the forward edit set to the extracted MLX-C tree. Idempotent: a
-/// retry over sources edited by a previous attempt recognizes the
-/// replacement and moves on, so a failed later step never wedges the
-/// working directory.
-fn apply_forward_source_edits(mlx_c_directory: &Path) -> Option<()> {
-    for forward_edit in MLX_C_FORWARD_SOURCE_EDITS {
-        let edited_file = mlx_c_directory.join(forward_edit.path);
-        let source_content = match std::fs::read_to_string(&edited_file) {
-            Ok(read_content) => read_content,
-            Err(read_error) => {
-                println!(
-                    "cargo:warning=forward edit could not read {}: {read_error}",
-                    edited_file.display()
-                );
-                return None;
-            }
-        };
-        let find_occurrences = source_content.matches(forward_edit.find).count();
-        if find_occurrences == 1 {
-            let patched_content =
-                source_content.replacen(forward_edit.find, forward_edit.replacement, 1);
-            if let Err(write_error) = std::fs::write(&edited_file, patched_content) {
-                println!(
-                    "cargo:warning=forward edit could not write {}: {write_error}",
-                    edited_file.display()
-                );
-                return None;
-            }
-        } else {
-            let replacement_occurrences = source_content.matches(forward_edit.replacement).count();
-            if find_occurrences == 0 && replacement_occurrences == 1 {
-                // Already applied by a previous attempt over the same
-                // extracted tree; the edit set is idempotent by design.
-                continue;
-            }
-            println!(
-                "cargo:warning=forward edit for {} found its target {} times \
-                 (already-applied form {} times); the pinned MLX-C sources \
-                 drifted — reconcile the forward edit set (droppable with \
-                 {})",
-                forward_edit.path,
-                find_occurrences,
-                replacement_occurrences,
-                forward_edit.drop_with
-            );
-            return None;
-        }
-    }
-    Some(())
-}
+use native_forward_edits::apply_forward_source_edits;
 
 /// The progress-file environment variable: when it names an absolute file,
 /// every structured progress line is appended there in addition to stdout.
@@ -378,31 +277,48 @@ pub fn ensure_pinned_pair() -> NativeBuildOutcome {
                 .arg("-DBUILD_SHARED_LIBS=ON")
                 .arg("-DMLX_METAL_JIT=ON")
                 .arg(format!("-DCMAKE_INSTALL_PREFIX={}", prefix.display())),
-        )
-        .and_then(|()| {
-            run_step(
-                &working_directory,
-                Command::new("cmake")
-                    .arg("--build")
-                    .arg(&mlx_build)
-                    .arg("--parallel")
-                    .arg(&parallelism),
-            )
-        })
-        .and_then(|()| {
-            run_step(
-                &working_directory,
-                Command::new("cmake").arg("--install").arg(&mlx_build),
-            )
-        });
+        );
         if configured.is_none() {
             operation.complete("failed");
             // A failed CMake configure leaves a CMakeCache.txt that pins the
             // poisoned attempt — a stale MLX_DIR, an old option set — which a
             // retry, including one through a changed recipe, must not
             // inherit; find_package consults the cached value first, ahead of
-            // any prefix path. Start the next attempt from a clean cache.
-            let _ = std::fs::remove_dir_all(&mlx_build);
+            // any prefix path. Purge the whole configure-only tree, and say
+            // so if even the purge fails: a silent purge failure would hand
+            // the next attempt exactly the poisoned cache this prevents.
+            if let Err(purge_error) = std::fs::remove_dir_all(&mlx_build) {
+                println!(
+                    "cargo:warning=failed to purge the poisoned CMake build tree at {}: \
+                     {purge_error}",
+                    mlx_build.display()
+                );
+            }
+            return NativeBuildOutcome::Failed;
+        }
+        let built_and_installed = configured
+            .and_then(|()| {
+                run_step(
+                    &working_directory,
+                    Command::new("cmake")
+                        .arg("--build")
+                        .arg(&mlx_build)
+                        .arg("--parallel")
+                        .arg(&parallelism),
+                )
+            })
+            .and_then(|()| {
+                run_step(
+                    &working_directory,
+                    Command::new("cmake").arg("--install").arg(&mlx_build),
+                )
+            });
+        if built_and_installed.is_none() {
+            // A failed build or install after a successful configure KEEPS
+            // the build tree: the configure decisions were sound, and a
+            // retry resumes incrementally instead of throwing away a
+            // multi-minute compile because the last step stumbled.
+            operation.complete("failed");
             return NativeBuildOutcome::Failed;
         }
         operation.complete("ok");
@@ -438,28 +354,41 @@ pub fn ensure_pinned_pair() -> NativeBuildOutcome {
                 .arg("-DMLX_C_USE_SYSTEM_MLX=ON")
                 .arg(format!("-DCMAKE_PREFIX_PATH={}", prefix.display()))
                 .arg(format!("-DCMAKE_INSTALL_PREFIX={}", prefix.display())),
-        )
-        .and_then(|()| {
-            run_step(
-                &working_directory,
-                Command::new("cmake")
-                    .arg("--build")
-                    .arg(&mlx_c_build)
-                    .arg("--parallel")
-                    .arg(&parallelism),
-            )
-        })
-        .and_then(|()| {
-            run_step(
-                &working_directory,
-                Command::new("cmake").arg("--install").arg(&mlx_c_build),
-            )
-        });
+        );
         if configured.is_none() {
             operation.complete("failed");
-            // Same cache-poisoning rationale as the MLX side: a failed
-            // configure must not pin its decisions into the retry.
-            let _ = std::fs::remove_dir_all(&mlx_c_build);
+            // Same configure-poisoning rationale as the MLX side, with the
+            // same loud purge if even the cleanup fails.
+            if let Err(purge_error) = std::fs::remove_dir_all(&mlx_c_build) {
+                println!(
+                    "cargo:warning=failed to purge the poisoned CMake build tree at {}: \
+                     {purge_error}",
+                    mlx_c_build.display()
+                );
+            }
+            return NativeBuildOutcome::Failed;
+        }
+        let built_and_installed = configured
+            .and_then(|()| {
+                run_step(
+                    &working_directory,
+                    Command::new("cmake")
+                        .arg("--build")
+                        .arg(&mlx_c_build)
+                        .arg("--parallel")
+                        .arg(&parallelism),
+                )
+            })
+            .and_then(|()| {
+                run_step(
+                    &working_directory,
+                    Command::new("cmake").arg("--install").arg(&mlx_c_build),
+                )
+            });
+        if built_and_installed.is_none() {
+            // Build or install failure after a sound configure keeps the
+            // tree, exactly as on the MLX side.
+            operation.complete("failed");
             return NativeBuildOutcome::Failed;
         }
         operation.complete("ok");

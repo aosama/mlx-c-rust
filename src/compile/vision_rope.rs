@@ -16,7 +16,7 @@ use crate::{MlxArrayVector, MlxStream, raw};
 /// where `rotated = concat(negative(second_half), first_half, axis=2)`.
 ///
 /// The two head-half slices are deliberately kept OUTSIDE this compiled graph.
-/// The pinned MLX (0.32.3) `Slice` primitive has no `output_shapes` override, so
+/// The pinned MLX (0.32.4) `Slice` primitive has no `output_shapes` override, so
 /// shapeless compilation cannot re-derive a slice's output shape for the varying
 /// patch count; the graph therefore receives the pre-sliced halves and only fuses
 /// the elementwise tail (the concat remains one shape kernel).
