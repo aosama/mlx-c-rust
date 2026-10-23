@@ -1,13 +1,17 @@
 [package]
 name = "mlx-c-rust"
-version = "0.7.0"
+# Pre-release while the extracted bridge is in its shakedown period; the
+# stable 0.7.0 lands once early adopters have exercised it. Pre-releases are
+# never resolved by default dependency resolution, so nobody gets an early
+# build accidentally.
+version = "0.7.0-alpha.1"
 edition = "2024"
 # The crate version mirrors the vendored MLX-C release it binds (the scheme
 # mlx-sys established): MLX-C 0.7.0 -> crate 0.7.0. Users read the Apple MLX-C
 # version straight off the crate version. Pre-1.0 semantic versioning on both
 # sides makes minor-version breaking changes honest.
 rust-version = "1.101"
-description = "A complete, low-level, policy-free Rust bridge to the public MLX-C API of Apple's MLX array framework for Apple silicon."
+description = "A complete, low-level, policy-free Rust bridge to the MLX-C API of Apple's MLX (binds MLX-C 0.7, MLX 0.32) for Apple silicon."
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/aosama/mlx-c-rust"
 documentation = "https://docs.rs/mlx-c-rust"

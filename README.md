@@ -2,6 +2,8 @@
 
 A complete, low-level, policy-free Rust bridge to the public [MLX-C](https://github.com/ml-explore/mlx-c) C API of Apple's [MLX](https://github.com/ml-explore/mlx) array framework for Apple silicon.
 
+**Current release binds MLX-C `v0.7.0` / MLX `v0.32.x`.**
+
 ## The goal
 
 MLX-C exposes the full power of MLX through a stable C Application Programming Interface. This crate binds **every public symbol that API declares** — not a demand-driven subset — so any capability Apple ships is callable from Rust the day the pin moves. Completeness is enforced, not aspirational: the vendored headers are bindgen-translated in full, and the bridged-symbol inventory they produce feeds a coverage contract that fails when a new MLX-C release adds or removes surface.
