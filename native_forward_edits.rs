@@ -16,10 +16,14 @@
 pub struct ForwardSourceEdit {
     /// Path of the edited file, relative to the extracted MLX-C tree.
     pub path: &'static str,
-    /// The exact text to find. It must occur exactly once — or, on a retry
-    /// over already-edited sources, exactly zero times with the replacement
-    /// present once — so a drifted upstream fails the build loudly instead
-    /// of editing the wrong site.
+    /// The exact text to find, anchored so it occurs exactly once in the
+    /// upstream file. On a retry over already-edited sources the counted
+    /// state must equal the APPLIED state — which the rule computes from
+    /// whether the replacement contains the find text: containing edits
+    /// still match find once (nested inside the replacement), non-
+    /// containing edits match it zero times. Anything else means upstream
+    /// drifted, and the build fails loudly instead of editing a moved
+    /// target.
     pub find: &'static str,
     /// The replacement text.
     pub replacement: &'static str,

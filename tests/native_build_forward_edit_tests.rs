@@ -153,12 +153,7 @@ fn should_handle_edits_whose_replacement_does_not_contain_the_find_text() {
                       find_package(dep REQUIRED)\n  find_package(SYSTEM REQUIRED)",
         drop_with: "nothing; this edit exists only in tests",
     };
-    let synthetic_set = [ForwardSourceEdit {
-        path: synthetic_edit.path,
-        find: synthetic_edit.find,
-        replacement: synthetic_edit.replacement,
-        drop_with: synthetic_edit.drop_with,
-    }];
+    let synthetic_set = [synthetic_edit];
     let mlx_c_directory = std::env::temp_dir().join(format!(
         "mlx-c-rust-forward-edit-shape-test-{}-{}",
         std::process::id(),

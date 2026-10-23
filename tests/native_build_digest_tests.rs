@@ -35,5 +35,5 @@ fn should_keep_pinned_pair_identity_stable() {
     // updating it must therefore always be a conscious act that rides a
     // deliberate pin or recipe bump, never an accident of refactoring or a
     // dependency upgrade changing how digests render.
-    assert_eq!(pinned_pair_identity(), "a2e8315a617d26c3");
+    assert_eq!(pinned_pair_identity(), "1f41da67bbf3ea74");
 }
