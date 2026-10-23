@@ -39,6 +39,27 @@ const BINDGEN_TYPE_ALLOWLIST: &str = "mlx_.*";
 /// headers.
 const BRIDGED_INVENTORY_FILE_NAME: &str = "bridged_inventory.rs";
 
+/// Include arguments that make bindgen's clang able to parse the vendored
+/// headers on a Linux host. Clang reaches for the host glibc `<stdint.h>`,
+/// whose `bits/` directory lives in the distribution's multiarch include
+/// path (`/usr/include/x86_64-linux-gnu` and friends); some libclang
+/// builds — the ones docs.rs and some hosted runners select — never add
+/// that directory to their search path, and binding generation dies with
+/// `bits/libc-header-start.h not found`. An explicit `-I` resolves the
+/// header regardless of which libclang won the loading search. The
+/// directory never exists on macOS hosts, whose single-architecture SDK
+/// layout carries those headers directly, so the same check is a no-op
+/// there — kept runtime-pure so every host type-checks the same code.
+fn linux_host_include_arguments() -> Vec<String> {
+    let host_triplet_include_directory =
+        format!("/usr/include/{}-linux-gnu", std::env::consts::ARCH);
+    if Path::new(&host_triplet_include_directory).is_dir() {
+        vec![format!("-I{host_triplet_include_directory}")]
+    } else {
+        Vec::new()
+    }
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let manifest_directory =
         PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").ok_or("CARGO_MANIFEST_DIR is unset")?);
@@ -59,6 +80,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let bindings = bindgen::Builder::default()
         .header(mlx_c_header.to_string_lossy())
         .clang_arg(format!("-I{}", include_directory.display()))
+        .clang_args(linux_host_include_arguments())
         .allowlist_function(BINDGEN_FUNCTION_ALLOWLIST)
         .allowlist_type(BINDGEN_TYPE_ALLOWLIST)
         .generate_comments(false)
@@ -78,6 +100,20 @@ fn main() -> Result<(), Box<dyn Error>> {
 /// are emitted: library compilation and documentation builds still work, and
 /// the failure surfaces only when a consumer links a binary.
 fn emit_link_instructions() {
+    if !cfg!(target_os = "macos") {
+        // The pinned pair compiles MLX, which needs Apple's Metal stack: a
+        // non-mac host can never provide it. Documentation and check lanes
+        // never link, so the ladder stops here with a warning instead of
+        // burning build minutes (docs.rs builds are time-boxed) on a doomed
+        // CMake attempt. Linking consumers are on Apple silicon by
+        // definition.
+        println!(
+            "cargo:warning=no MLX-C library can be built on this host operating system; \
+             the crate compiles and documents, but linking a binary that uses it needs \
+             an Apple silicon Mac"
+        );
+        return;
+    }
     if let Some(prefix) = prefix_from_environment() {
         emit_prefix_link_flags(&prefix);
         return;
