@@ -45,8 +45,8 @@ jobs:
       - name: Build documentation as docs.rs does
         run: cargo doc --no-deps --target aarch64-apple-darwin
 
-  zero-config:
-    name: Zero-configuration adoption journey
+  native:
+    name: Adopt, build, and test — the one macOS journey
     runs-on: macos-latest
     timeout-minutes: 45
     env:
@@ -58,12 +58,13 @@ jobs:
         run: rustup show
       - name: Configure the shared compilation cache
         uses: mozilla/sccache-action@v0.0.11
-      # Nothing else is configured: this job proves the adopter experience —
-      # the build script downloads, verifies, and compiles the pinned MLX and
-      # MLX-C sources on its own, then links and runs the test suite. The
-      # progress file is tailed into the log so the multi-minute CMake phases
-      # are visible as they happen, not after the build script finishes.
-      - name: Build and test with no configuration at all
+      # Nothing else is configured: this single job IS the adoption journey —
+      # the build script locates no library, so it downloads, verifies, and
+      # compiles the pinned MLX and MLX-C sources once (the only native
+      # compilation in this pipeline), then links and runs the test suite.
+      # The progress file is tailed into the log so the multi-minute CMake
+      # phases are visible as they happen, not after the script finishes.
+      - name: Adopt with no configuration, then test
         run: |
           export MLX_C_RUST_NATIVE_PROGRESS_FILE="$RUNNER_TEMP/native-build-progress.log"
           tail -f "$MLX_C_RUST_NATIVE_PROGRESS_FILE" &
@@ -72,53 +73,3 @@ jobs:
           build_status=$?
           kill "$tail_process_id" 2>/dev/null || true
           exit $build_status
-
-  test:
-    name: Link and run tests against a real MLX-C
-    runs-on: macos-latest
-    timeout-minutes: 45
-    env:
-      RUSTC_WRAPPER: sccache
-      SCCACHE_GHA_ENABLED: "true"
-      MLX_C_RUST_MLX_C_PREFIX: ${{ github.workspace }}/target/native-prefix
-    steps:
-      - uses: actions/checkout@v7
-      - name: Activate the pinned toolchain
-        run: rustup show
-      - name: Configure the shared compilation cache
-        uses: mozilla/sccache-action@v0.0.11
-      - name: Restore the native MLX and MLX-C build
-        id: native-cache
-        uses: actions/cache@v6
-        with:
-          # The cache key follows the vendored MLX-C tree: a pin bump changes
-          # the headers, misses the cache, and rebuilds the native libraries.
-          key: native-mlx-0.32.3-mlx-c-0.7.0-${{ hashFiles('vendor/mlx-c/mlx/c/mlx.h') }}
-          path: target/native-prefix
-      - name: Build MLX and MLX-C from the pinned releases
-        if: steps.native-cache.outputs.cache-hit != 'true'
-        run: |
-          set -euo pipefail
-          mkdir -p target/native-sources && cd target/native-sources
-          curl -sSL https://github.com/ml-explore/mlx/archive/refs/tags/v0.32.3.tar.gz | tar xz
-          curl -sSL https://github.com/ml-explore/mlx-c/archive/refs/tags/v0.7.0.tar.gz | tar xz
-          mv mlx-0.32.3 mlx
-          mv mlx-c-0.7.0 mlx-c
-          cmake -S mlx -B mlx-build \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DBUILD_SHARED_LIBS=ON \
-            -DMLX_METAL_JIT=ON \
-            -DCMAKE_INSTALL_PREFIX="$MLX_C_RUST_MLX_C_PREFIX"
-          cmake --build mlx-build --parallel "$(sysctl -n hw.logicalcpu)"
-          cmake --install mlx-build
-          cmake -S mlx-c -B mlx-c-build \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DBUILD_SHARED_LIBS=ON \
-            -DMLX_DIR="$PWD/mlx-build" \
-            -DCMAKE_INSTALL_PREFIX="$MLX_C_RUST_MLX_C_PREFIX"
-          cmake --build mlx-c-build --parallel "$(sysctl -n hw.logicalcpu)"
-          cmake --install mlx-c-build
-      - name: Probe Metal GPU availability on the runner
-        run: cargo run --example metal_probe
-      - name: Run the test suite serially
-        run: cargo test -- --test-threads=1
