@@ -1,0 +1,14 @@
+[package]
+name = "xtask"
+version = "0.32.3-alpha.1"
+edition = "2024"
+rust-version = "1.101"
+description = "Typed repository tooling for mlx-c-rust, invoked as cargo xtask <command>."
+license = "MIT OR Apache-2.0"
+publish = false
+
+[dependencies]
+# The xtask binary is the human and continuous-integration entry point for
+# the same native-build engine the crate's build script runs; one shared
+# module, two typed entry points, no shell.
+sha2 = "0.10"

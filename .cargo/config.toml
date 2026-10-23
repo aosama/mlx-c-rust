@@ -5,3 +5,13 @@
 # "warnings"] which would also hard-fail on warnings emitted by third-party
 # dependencies.
 warnings = "deny"
+
+[alias]
+# Repository tooling runs as typed Rust through the xtask pattern. The one
+# subcommand today: `cargo xtask build-native [--force]` compiles the pinned
+# MLX and MLX-C pair into the machine-shared identity-keyed prefix under
+# ~/.cache/mlx-c-rust/native/<identity>/prefix — the same prefix the crate's
+# build script reads — so the pair compiles once per machine per pin and
+# every consumer reuses it. The engine is the shared native_build.rs module;
+# there is no shell anywhere in the pipeline.
+xtask = "run -p xtask --"

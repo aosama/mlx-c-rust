@@ -23,6 +23,7 @@ readme = "README.md"
 keywords = ["mlx", "apple-silicon", "machine-learning", "bindings", "gpu"]
 categories = ["api-bindings", "science"]
 exclude = [
+  "xtask",
   ".github",
   ".cargo",
   "rust-toolchain.toml",
@@ -54,3 +55,8 @@ sha2 = "0.10"
 
 [package.metadata.docs.rs]
 targets = ["aarch64-apple-darwin"]
+
+# The repository tooling workspace: the root package is the published crate;
+# xtask carries the typed build-native command (see .cargo/config.toml).
+[workspace]
+members = ["xtask"]

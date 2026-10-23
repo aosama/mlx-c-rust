@@ -58,18 +58,19 @@ jobs:
         run: rustup show
       - name: Configure the shared compilation cache
         uses: mozilla/sccache-action@v0.0.11
-      # Nothing else is configured: this single job IS the adoption journey —
-      # the build script locates no library, so it downloads, verifies, and
-      # compiles the pinned MLX and MLX-C sources once (the only native
-      # compilation in this pipeline), then links and runs the test suite.
-      # The progress file is tailed into the log so the multi-minute CMake
-      # phases are visible as they happen, not after the script finishes.
-      - name: Adopt with no configuration, then test
-        run: |
-          export MLX_C_RUST_NATIVE_PROGRESS_FILE="$RUNNER_TEMP/native-build-progress.log"
-          tail -f "$MLX_C_RUST_NATIVE_PROGRESS_FILE" &
-          tail_process_id=$!
-          cargo test -- --test-threads=1
-          build_status=$?
-          kill "$tail_process_id" 2>/dev/null || true
-          exit $build_status
+      # The native pair is compiled once per pin into the machine-shared
+      # prefix, by the same typed engine consumers use. The cache key hashes
+      # the engine module (which carries the pin tags and checksums), so a
+      # pin bump misses the cache and the cold journey proves itself exactly
+      # then; every other push reuses and finishes in seconds.
+      - name: Restore the compiled pinned pair
+        uses: actions/cache@v6
+        with:
+          key: native-pair-${{ hashFiles('native_build.rs') }}
+          path: ~/.cache/mlx-c-rust/native
+      - name: Build the pinned pair (typed, live progress)
+        run: cargo xtask build-native
+      # No configuration: the build script must find the machine-shared
+          # prefix the step above built — the adopter experience, proven.
+      - name: Test against the shared prefix
+        run: cargo test -- --test-threads=1

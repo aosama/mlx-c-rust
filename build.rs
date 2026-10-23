@@ -1,46 +1,35 @@
 //! Standalone bindgen generation for the public MLX-C API, from the headers
-//! vendored under `vendor/mlx-c/`.
+//! vendored under `vendor/mlx-c/`, plus library discovery for the pinned
+//! native pair.
 //!
 //! This build script translates the vendored headers of the pinned MLX-C
 //! release into Rust declarations and emits the bridged-symbol inventory that
 //! the coverage contract compares against those same headers.
 //!
-//! Linking a binary that uses this crate needs an MLX-C library, and the
-//! default is zero configuration: with nothing set, the script downloads the
-//! pinned MLX and MLX-C source releases (checksum-verified), compiles them
-//! with CMake once, and links against the result. Explicit overrides win in
-//! this order: the `MLX_C_RUST_MLX_C_PREFIX` environment variable (a prefix
-//! whose `lib/` holds the libraries), then `pkg-config mlx-c`, then the
-//! standard Homebrew prefixes. The built prefix caches inside the build
-//! directory and survives incremental rebuilds until `cargo clean`.
+//! Linking a binary that uses this crate needs an MLX-C library. Discovery
+//! order, first match wins: the `MLX_C_RUST_MLX_C_PREFIX` environment
+//! variable, the machine-shared identity-keyed prefix that `cargo xtask
+//! build-native` (or a previous build of any consumer) compiled, the
+//! standard Homebrew prefixes, `pkg-config mlx-c`, and — the zero-
+//! configuration default — the typed native-build engine in `native_build.rs`
+//! (this crate's own code, no shell), which downloads the checksum-verified
+//! pinned sources and compiles them once into that same shared prefix. The
+//! pair therefore compiles once per machine per pin, and every later
+//! consumer reuses it.
 
-#[path = "build_progress.rs"]
-mod build_progress;
-
-use build_progress::NativeBuildProgress;
+#[path = "native_build.rs"]
+mod native_build;
 
 use std::{
     env,
     error::Error,
     path::{Path, PathBuf},
-    process::Command,
 };
 
 use pkg_config::Config as PkgConfig;
-use sha2::{Digest, Sha256};
 
 const VENDORED_HEADERS_DIRECTORY: &str = "vendor/mlx-c";
 const MLX_C_PREFIX_VARIABLE: &str = "MLX_C_RUST_MLX_C_PREFIX";
-
-/// The native pair this crate version is verified against. The crate version
-/// names the MLX side; bump both together with the version.
-const PINNED_MLX_TAG: &str = "v0.32.3";
-const PINNED_MLX_C_TAG: &str = "v0.7.0";
-const PINNED_MLX_TARBALL_SHA256: &str =
-    "4129039ddcb36cb860982b616c975a5b9b8e6d8fa97efa86335b4427c29c4b4b";
-const PINNED_MLX_C_TARBALL_SHA256: &str =
-    "ee726bb38e191bb3c516a6bae47dc8abad9e5f273873385839019ce46bfceab5";
-const PINNED_TARBALL_BASE_URL: &str = "https://github.com";
 
 const BINDGEN_FUNCTION_ALLOWLIST: &str = "mlx_.*";
 const BINDGEN_TYPE_ALLOWLIST: &str = "mlx_.*";
@@ -83,20 +72,15 @@ fn main() -> Result<(), Box<dyn Error>> {
 }
 
 /// Emits the linker instructions for an MLX-C library. The ladder, first
-/// match wins: the `MLX_C_RUST_MLX_C_PREFIX` environment variable, the
-/// standard Homebrew prefixes, `pkg-config mlx-c`, and — the zero-config
-/// default — downloading and compiling the pinned MLX and MLX-C sources.
+/// match wins: the prefix variable, the machine-shared identity-keyed prefix
+/// (building it if absent — the zero-configuration default), Homebrew, and
+/// pkg-config. When nothing resolves, a warning is printed and no link flags
+/// are emitted: library compilation and documentation builds still work, and
+/// the failure surfaces only when a consumer links a binary.
 fn emit_link_instructions() {
-    if let Some(prefix) = env::var_os(MLX_C_PREFIX_VARIABLE) {
-        let prefix = PathBuf::from(prefix);
-        if prefix_carries_mlxc_library(&prefix) {
-            emit_prefix_link_flags(&prefix);
-            return;
-        }
-        println!(
-            "cargo:warning=MLX_C_RUST_MLX_C_PREFIX is set but {} holds no MLX-C library; continuing down the discovery ladder",
-            prefix.join("lib").display()
-        );
+    if let Some(prefix) = prefix_from_environment() {
+        emit_prefix_link_flags(&prefix);
+        return;
     }
     if let Some(prefix) = homebrew_prefix_with_mlxc() {
         emit_prefix_link_flags(&prefix);
@@ -120,23 +104,46 @@ fn emit_link_instructions() {
         }
         return;
     }
-    if let Some(prefix) = fetch_and_build_pinned_pair() {
-        emit_prefix_link_flags(&prefix);
-        return;
+
+    // Nothing located: the zero-configuration cold path. The typed engine in
+    // `native_build.rs` compiles the pinned pair into the machine-shared
+    // prefix — the same directory `cargo xtask build-native` maintains — so
+    // this compilation is shared with every other consumer on the machine.
+    match native_build::ensure_pinned_pair() {
+        native_build::NativeBuildOutcome::Built | native_build::NativeBuildOutcome::Reused => {
+            if let Some(prefix) = native_build::shared_prefix()
+                .filter(|candidate| native_build::prefix_carries_mlxc_library(candidate))
+            {
+                emit_prefix_link_flags(&prefix);
+                return;
+            }
+            println!(
+                "cargo:warning=the native build reported success but the shared prefix \
+                 holds no MLX-C library; continuing without link flags"
+            );
+        }
+        native_build::NativeBuildOutcome::Failed => println!(
+            "cargo:warning=no MLX-C library could be located or built; the crate compiles, \
+             but linking a binary that uses it will report undefined MLX symbols. Set \
+             {MLX_C_PREFIX_VARIABLE}, run `cargo xtask build-native`, install mlx-c \
+             through Homebrew, or install CMake (brew install cmake) so the pinned \
+             sources can be built automatically."
+        ),
     }
-    println!(
-        "cargo:warning=no MLX-C library could be located or built; the crate compiles, \
-         but linking a binary that uses it will report undefined MLX symbols. Set \
-         {MLX_C_PREFIX_VARIABLE}, install mlx-c through Homebrew, or install CMake \
-         (brew install cmake) so the pinned sources can be built automatically."
-    );
 }
 
-/// Reports whether `prefix/lib` holds an MLX-C library, shared or static.
-fn prefix_carries_mlxc_library(prefix: &Path) -> bool {
-    let library_directory = prefix.join("lib");
-    library_directory.join("libmlxc.dylib").is_file()
-        || library_directory.join("libmlxc.a").is_file()
+/// The explicit prefix override, validated before use.
+fn prefix_from_environment() -> Option<PathBuf> {
+    let prefix = PathBuf::from(env::var_os(MLX_C_PREFIX_VARIABLE)?);
+    if native_build::prefix_carries_mlxc_library(&prefix) {
+        return Some(prefix);
+    }
+    println!(
+        "cargo:warning=MLX_C_RUST_MLX_C_PREFIX is set but {} holds no MLX-C library; \
+         continuing down the discovery ladder",
+        prefix.join("lib").display()
+    );
+    None
 }
 
 /// Finds a Homebrew installation whose `lib` already carries MLX-C (the
@@ -148,7 +155,7 @@ fn homebrew_prefix_with_mlxc() -> Option<PathBuf> {
     }
     candidates
         .into_iter()
-        .find(|prefix| prefix_carries_mlxc_library(prefix))
+        .find(|prefix| native_build::prefix_carries_mlxc_library(prefix))
 }
 
 /// Emits the link flags for a prefix whose `lib` holds the libraries: the
@@ -175,218 +182,6 @@ fn emit_prefix_link_flags(prefix: &Path) {
             println!("cargo:rustc-link-lib=framework={framework}");
         }
     }
-}
-
-/// The zero-configuration path: download the pinned MLX and MLX-C source
-/// releases, verify their checksums, compile both with CMake, and install
-/// into a prefix inside this build directory. The prefix persists across
-/// incremental rebuilds (Cargo keeps the build directory until `cargo
-/// clean`), so the native compilation happens once per profile.
-fn fetch_and_build_pinned_pair() -> Option<PathBuf> {
-    let build_started_at = std::time::Instant::now();
-    let native_build_progress = match NativeBuildProgress::from_environment() {
-        Ok(progress) => progress,
-        Err(configuration_error) => {
-            println!("cargo:warning={configuration_error}; progress reporting disabled");
-            NativeBuildProgress::disabled()
-        }
-    };
-    let output_directory =
-        PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR is set for build scripts"));
-    let native_directory = output_directory.join("native");
-    let prefix = native_directory.join("prefix");
-    let parallelism = env::var("NUM_JOBS").unwrap_or_else(|_| "4".to_owned());
-    if prefix_carries_mlxc_library(&prefix) {
-        // The warm path most builds take: report the reuse so the log states
-        // why this build script finished in milliseconds.
-        native_build_progress.record_build_start(&parallelism);
-        native_build_progress.record_build_completion(false, build_started_at.elapsed());
-        return Some(prefix);
-    }
-    native_build_progress.record_build_start(&parallelism);
-    let whole_build_operation = native_build_progress.begin_operation("automatic-native-build");
-    for required_tool in ["curl", "tar", "cmake"] {
-        if Command::new(required_tool)
-            .arg("--version")
-            .output()
-            .is_err()
-        {
-            println!(
-                "cargo:warning=automatic MLX build needs `{required_tool}` on PATH \
-                 (brew install {required_tool}); no MLX-C library will be linked"
-            );
-            return None;
-        }
-    }
-    let _ = std::fs::create_dir_all(&native_directory);
-    let mlx_source = download_verified_tarball(
-        native_directory.join("mlx.tar.gz"),
-        &format!(
-            "{PINNED_TARBALL_BASE_URL}/ml-explore/mlx/archive/refs/tags/{PINNED_MLX_TAG}.tar.gz"
-        ),
-        PINNED_MLX_TARBALL_SHA256,
-    )?;
-    let mlx_c_source = download_verified_tarball(
-        native_directory.join("mlx-c.tar.gz"),
-        &format!(
-            "{PINNED_TARBALL_BASE_URL}/ml-explore/mlx-c/archive/refs/tags/{PINNED_MLX_C_TAG}.tar.gz"
-        ),
-        PINNED_MLX_C_TARBALL_SHA256,
-    )?;
-    let mlx_directory = native_directory.join("mlx");
-    let mlx_c_directory = native_directory.join("mlx-c");
-    if !mlx_directory.is_dir() {
-        run_step(
-            "extract the pinned MLX source",
-            &native_directory,
-            Command::new("tar").arg("xzf").arg(&mlx_source),
-        )?;
-        let _ = std::fs::rename(
-            native_directory.join(format!("mlx-{}", PINNED_MLX_TAG.trim_start_matches('v'))),
-            &mlx_directory,
-        );
-    }
-    if !mlx_c_directory.is_dir() {
-        run_step(
-            "extract the pinned MLX-C source",
-            &native_directory,
-            Command::new("tar").arg("xzf").arg(&mlx_c_source),
-        )?;
-        let _ = std::fs::rename(
-            native_directory.join(format!(
-                "mlx-c-{}",
-                PINNED_MLX_C_TAG.trim_start_matches('v')
-            )),
-            &mlx_c_directory,
-        );
-    }
-    let parallelism = env::var("NUM_JOBS").unwrap_or_else(|_| "4".to_owned());
-    let mlx_build = native_directory.join("mlx-build");
-    if !prefix.join("lib").join("libmlx.dylib").is_file() {
-        run_step(
-            "configure the pinned MLX build",
-            &native_directory,
-            Command::new("cmake")
-                .arg("-S")
-                .arg(&mlx_directory)
-                .arg("-B")
-                .arg(&mlx_build)
-                .arg("-DCMAKE_BUILD_TYPE=Release")
-                .arg("-DBUILD_SHARED_LIBS=ON")
-                .arg("-DMLX_METAL_JIT=ON")
-                .arg(format!("-DCMAKE_INSTALL_PREFIX={}", prefix.display())),
-        )?;
-        run_step(
-            "compile the pinned MLX",
-            &native_directory,
-            Command::new("cmake")
-                .arg("--build")
-                .arg(&mlx_build)
-                .arg("--parallel")
-                .arg(&parallelism),
-        )?;
-        run_step(
-            "install the pinned MLX",
-            &native_directory,
-            Command::new("cmake").arg("--install").arg(&mlx_build),
-        )?;
-    }
-    let mlx_c_build = native_directory.join("mlx-c-build");
-    if !prefix_carries_mlxc_library(&prefix) {
-        run_step(
-            "configure the pinned MLX-C build",
-            &native_directory,
-            Command::new("cmake")
-                .arg("-S")
-                .arg(&mlx_c_directory)
-                .arg("-B")
-                .arg(&mlx_c_build)
-                .arg("-DCMAKE_BUILD_TYPE=Release")
-                .arg("-DBUILD_SHARED_LIBS=ON")
-                .arg("-DMLX_BUILD_EXAMPLES=OFF")
-                .arg(format!("-DMLX_DIR={}", mlx_build.display()))
-                .arg(format!("-DCMAKE_INSTALL_PREFIX={}", prefix.display())),
-        )?;
-        run_step(
-            "compile the pinned MLX-C",
-            &native_directory,
-            Command::new("cmake")
-                .arg("--build")
-                .arg(&mlx_c_build)
-                .arg("--parallel")
-                .arg(&parallelism),
-        )?;
-        run_step(
-            "install the pinned MLX-C",
-            &native_directory,
-            Command::new("cmake").arg("--install").arg(&mlx_c_build),
-        )?;
-    }
-    if prefix_carries_mlxc_library(&prefix) {
-        whole_build_operation.complete("ok");
-        native_build_progress.record_build_completion(true, build_started_at.elapsed());
-        Some(prefix)
-    } else {
-        whole_build_operation.complete("failed");
-        native_build_progress.record_build_completion(false, build_started_at.elapsed());
-        println!(
-            "cargo:warning=the automatic MLX build finished but {} holds no MLX-C library",
-            prefix.join("lib").display()
-        );
-        None
-    }
-}
-
-/// Downloads `tarball_path` from `tarball_url` unless it is already present,
-/// and verifies its SHA-256 against `expected_sha256` before use.
-fn download_verified_tarball(
-    tarball_path: PathBuf,
-    tarball_url: &str,
-    expected_sha256: &str,
-) -> Option<PathBuf> {
-    if !tarball_path.is_file() {
-        run_step(
-            "download the pinned MLX source release",
-            tarball_path.parent()?,
-            Command::new("curl")
-                .arg("-sSL")
-                .arg("-o")
-                .arg(&tarball_path)
-                .arg(tarball_url),
-        )?;
-    }
-    let tarball_bytes = std::fs::read(&tarball_path).ok()?;
-    let mut hasher = Sha256::new();
-    hasher.update(&tarball_bytes);
-    let actual_sha256 = format!("{:x}", hasher.finalize());
-    if actual_sha256 != expected_sha256 {
-        println!(
-            "cargo:warning={} has SHA-256 {actual_sha256}, expected {expected_sha256}; \
-             refusing to build from an unverified source",
-            tarball_path.display()
-        );
-        return None;
-    }
-    Some(tarball_path)
-}
-
-/// Runs one build step, mapping a failure to a warning that names the step.
-fn run_step(step_description: &str, working_directory: &Path, command: &mut Command) -> Option<()> {
-    let command_status = command
-        .current_dir(working_directory)
-        .status()
-        .map_err(|launch_error| {
-            println!(
-                "cargo:warning=failed to run {}: {launch_error}",
-                command.get_program().to_string_lossy()
-            );
-        })
-        .ok()?;
-    if !command_status.success() {
-        println!("cargo:warning=automatic MLX build failed to {step_description}");
-        return None;
-    }
-    Some(())
 }
 
 /// Extracts the bridged `mlx_*` functions and types from the generated
