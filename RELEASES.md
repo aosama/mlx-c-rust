@@ -12,7 +12,7 @@ fixes ride as patch bumps (see the Versioning section of the README).
 
 | Change | Version | Extra obligation |
 |---|---|---|
-| Defect fix in the bridge (safety, wrong semantics, leak) | Patch (`0.32.3` → `0.32.4`) | Release notes state whether the unsafe boundary was touched |
+| Defect fix in the bridge (safety, wrong semantics, leak) | Patch (`0.32.4` → `0.32.5`) | Release notes state whether the unsafe boundary was touched |
 | New bindings for symbols already in the vendored headers | Patch | `COVERAGE_INVENTORY.md` updated |
 | MLX-C header pin bump within the same MLX release | Patch | Inventory note; checksums enforced by `native_build.rs` |
 | Verification against a new MLX release | Version rides MLX (`0.33.0-alpha.1` …) | The native cache key changes with the pin, so the cold journey proves itself exactly then |
@@ -35,6 +35,11 @@ pull request, linked to its issue (`Fixes #N`), containing:
 3. `README.md` and `COVERAGE_INVENTORY.md` refreshed if the verified
    pair or the surface moved.
 4. The release line's version link updated to the new release page.
+5. The pairing reconciled: the pinned MLX and MLX-C tags with their
+   checksums brought current, and the engine's forward edit set reviewed —
+   each entry either still needed (carrying its drop-with note) or dropped
+   because an MLX-C release caught up. The crate tracks MLX releases; the
+   version names the MLX the pair truly runs against.
 
 ## Verification gates
 

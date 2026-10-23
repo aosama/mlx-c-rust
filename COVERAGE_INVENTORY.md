@@ -4,6 +4,12 @@ Recorded for the vendored MLX-C v0.7.0 headers. The build script emits the
 bridged-symbol inventory on every compile; refresh this record after a
 deliberate surface or pin change.
 
+Pairing note: the native pair this crate verifies against is MLX v0.32.4 +
+MLX-C v0.7.0, carried forward by the reviewed edit set in
+`native_forward_edits.rs` (`MLX_C_FORWARD_SOURCE_EDITS`) until an MLX-C release
+pairs with that MLX. The forward edits are C++-side only — the C surface
+recorded below is exactly the vendored MLX-C v0.7.0 surface.
+
 - Public upstream functions: 669
 - Public upstream types: 84
 - Bridged functions: 670

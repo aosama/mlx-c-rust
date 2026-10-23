@@ -4,18 +4,20 @@ name = "mlx-c-rust"
 # stable release lands once early adopters have exercised it. Pre-releases
 # are never resolved by default dependency resolution, so nobody gets an
 # early build accidentally.
-version = "0.32.3-alpha.2"
+version = "0.32.4-alpha.1"
 edition = "2024"
 # The crate version names the MLX RELEASE THE CRATE IS VERIFIED AGAINST —
 # the number users search for and install (the scheme mlx-rs established for
-# user-facing crates; only internal sys layers version by MLX-C). The bound
-# MLX-C release and the verified pair are recorded here, in the README, and
-# in COVERAGE_INVENTORY.md: this release binds MLX-C v0.7.0 headers and is
-# verified against MLX v0.32.3. Our own fixes ride as patch bumps; an MLX-C
-# surface change within the same MLX release also rides as a patch bump with
-# an inventory note.
+# user-facing crates; only internal sys layers version by MLX-C). MLX-C is
+# the carrier for the C bridge, not the pace-setter: this release binds the
+# MLX-C v0.7.0 headers, carried forward to MLX v0.32.4 by this repository's
+# reviewed bridge adaptations (the forward edit set in native_forward_edits.rs),
+# until an MLX-C release pairs with that MLX. The bound pair is recorded
+# here, in the README, and in COVERAGE_INVENTORY.md. Our own fixes ride as
+# patch bumps; an MLX-C surface change within the same MLX release also
+# rides as a patch bump with an inventory note.
 rust-version = "1.101"
-description = "A complete, low-level, policy-free Rust bridge to the MLX-C API of Apple's MLX for Apple silicon. Version = the verified MLX release (0.32.3; binds MLX-C 0.7)."
+description = "A complete, low-level, policy-free Rust bridge to the MLX-C API of Apple's MLX for Apple silicon, tracking MLX releases. Version = the verified MLX release (0.32.4; carries MLX-C 0.7 forward)."
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/aosama/mlx-c-rust"
 documentation = "https://docs.rs/mlx-c-rust"
