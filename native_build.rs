@@ -67,6 +67,22 @@ pub const NATIVE_BUILD_PROGRESS_FILE_VARIABLE: &str = "MLX_C_RUST_NATIVE_PROGRES
 const MLX_C_SHARED_CACHE_DIRECTORY: &str = ".cache/mlx-c-rust/native";
 const COMPLETION_MARKER_DIRECTORY: &str = "complete";
 
+/// Lowercase hexadecimal for digest bytes, spelled out digit by digit.
+/// The sha2 0.10 line formatted digests through generic-array's LowerHex
+/// impl, which the digest 0.11 Array type does not carry; an explicit
+/// encoding also keeps the checksum comparison's shape independent of any
+/// transitive trait implementation. Byte-for-byte identical to the old
+/// formatting, so prefix identities and pinned checksums compare unchanged.
+pub fn digest_lowercase_hex(digest_bytes: &[u8]) -> String {
+    const HEX_DIGITS: &[u8; 16] = b"0123456789abcdef";
+    let mut hex_characters = String::with_capacity(digest_bytes.len() * 2);
+    for &digest_byte in digest_bytes {
+        hex_characters.push(HEX_DIGITS[(digest_byte >> 4) as usize] as char);
+        hex_characters.push(HEX_DIGITS[(digest_byte & 0x0f) as usize] as char);
+    }
+    hex_characters
+}
+
 /// The content-addressed identity of the pinned pair: any change to the tags,
 /// their verified checksums, or the build recipe below changes the directory,
 /// orphaning stale work.
@@ -77,7 +93,7 @@ pub fn pinned_pair_identity() -> String {
     hasher.update(PINNED_MLX_C_TAG);
     hasher.update(PINNED_MLX_C_TARBALL_SHA256);
     hasher.update(PINNED_PAIR_BUILD_RECIPE);
-    format!("{:x}", hasher.finalize())[..16].to_owned()
+    digest_lowercase_hex(hasher.finalize().as_ref())[..16].to_owned()
 }
 
 /// The machine-shared prefix for the pinned pair: every consumer on this
@@ -490,7 +506,7 @@ fn download_verified_tarball(
         let tarball_bytes = std::fs::read(&tarball_path).ok()?;
         let mut hasher = Sha256::new();
         hasher.update(&tarball_bytes);
-        let actual_sha256 = format!("{:x}", hasher.finalize());
+        let actual_sha256 = digest_lowercase_hex(hasher.finalize().as_ref());
         if actual_sha256 != expected_sha256 {
             println!(
                 "cargo:warning={} has SHA-256 {actual_sha256}, expected {expected_sha256}; \
