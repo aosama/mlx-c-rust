@@ -53,11 +53,20 @@ jobs:
         run: rustup show
       - name: Configure the shared compilation cache
         uses: mozilla/sccache-action@v0.0.11
-      # Nothing else: this job proves the adopter experience — the build
-      # script downloads, verifies, and compiles the pinned MLX and MLX-C
-      # sources on its own, then links and runs the test suite.
+      # Nothing else is configured: this job proves the adopter experience —
+      # the build script downloads, verifies, and compiles the pinned MLX and
+      # MLX-C sources on its own, then links and runs the test suite. The
+      # progress file is tailed into the log so the multi-minute CMake phases
+      # are visible as they happen, not after the build script finishes.
       - name: Build and test with no configuration at all
-        run: cargo test -- --test-threads=1
+        run: |
+          export MLX_C_RUST_NATIVE_PROGRESS_FILE="$RUNNER_TEMP/native-build-progress.log"
+          tail -f "$MLX_C_RUST_NATIVE_PROGRESS_FILE" &
+          tail_process_id=$!
+          cargo test -- --test-threads=1
+          build_status=$?
+          kill "$tail_process_id" 2>/dev/null || true
+          exit $build_status
 
   test:
     name: Link and run tests against a real MLX-C

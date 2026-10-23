@@ -14,6 +14,11 @@
 //! standard Homebrew prefixes. The built prefix caches inside the build
 //! directory and survives incremental rebuilds until `cargo clean`.
 
+#[path = "build_progress.rs"]
+mod build_progress;
+
+use build_progress::NativeBuildProgress;
+
 use std::{
     env,
     error::Error,
@@ -178,13 +183,28 @@ fn emit_prefix_link_flags(prefix: &Path) {
 /// incremental rebuilds (Cargo keeps the build directory until `cargo
 /// clean`), so the native compilation happens once per profile.
 fn fetch_and_build_pinned_pair() -> Option<PathBuf> {
+    let build_started_at = std::time::Instant::now();
+    let native_build_progress = match NativeBuildProgress::from_environment() {
+        Ok(progress) => progress,
+        Err(configuration_error) => {
+            println!("cargo:warning={configuration_error}; progress reporting disabled");
+            NativeBuildProgress::disabled()
+        }
+    };
     let output_directory =
         PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR is set for build scripts"));
     let native_directory = output_directory.join("native");
     let prefix = native_directory.join("prefix");
+    let parallelism = env::var("NUM_JOBS").unwrap_or_else(|_| "4".to_owned());
     if prefix_carries_mlxc_library(&prefix) {
+        // The warm path most builds take: report the reuse so the log states
+        // why this build script finished in milliseconds.
+        native_build_progress.record_build_start(&parallelism);
+        native_build_progress.record_build_completion(false, build_started_at.elapsed());
         return Some(prefix);
     }
+    native_build_progress.record_build_start(&parallelism);
+    let whole_build_operation = native_build_progress.begin_operation("automatic-native-build");
     for required_tool in ["curl", "tar", "cmake"] {
         if Command::new(required_tool)
             .arg("--version")
@@ -303,8 +323,12 @@ fn fetch_and_build_pinned_pair() -> Option<PathBuf> {
         )?;
     }
     if prefix_carries_mlxc_library(&prefix) {
+        whole_build_operation.complete("ok");
+        native_build_progress.record_build_completion(true, build_started_at.elapsed());
         Some(prefix)
     } else {
+        whole_build_operation.complete("failed");
+        native_build_progress.record_build_completion(false, build_started_at.elapsed());
         println!(
             "cargo:warning=the automatic MLX build finished but {} holds no MLX-C library",
             prefix.join("lib").display()
