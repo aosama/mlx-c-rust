@@ -16,8 +16,11 @@ use native_forward_edits::{MLX_C_FORWARD_SOURCE_EDITS, apply_forward_source_edit
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// A fresh temporary tree shaped like the extracted MLX-C sources, carrying
-/// the given body for the edit target file.
+/// A fresh temporary tree shaped like the extracted MLX-C sources. Every
+/// edit in the set gets its file seeded with fresh find text (so a whole-
+/// set apply proceeds past the entries the test is not exercising), and
+/// the first edit's file carries the given body — the one each contract
+/// varies.
 fn extracted_tree_with_target_body(target_body: &str) -> PathBuf {
     let mlx_c_directory = std::env::temp_dir().join(format!(
         "mlx-c-rust-forward-edit-test-{}-{}",
@@ -27,13 +30,17 @@ fn extracted_tree_with_target_body(target_body: &str) -> PathBuf {
             .expect("the system clock should be past the Unix epoch")
             .as_nanos()
     ));
+    for forward_edit in MLX_C_FORWARD_SOURCE_EDITS {
+        let seeded_file = mlx_c_directory.join(forward_edit.path);
+        fs::create_dir_all(
+            seeded_file
+                .parent()
+                .expect("the edit path names a file in directories"),
+        )
+        .expect("the synthetic extracted tree should create");
+        fs::write(&seeded_file, forward_edit.find).expect("the seeded file should write");
+    }
     let target_file = mlx_c_directory.join(MLX_C_FORWARD_SOURCE_EDITS[0].path);
-    fs::create_dir_all(
-        target_file
-            .parent()
-            .expect("the edit path names a file in directories"),
-    )
-    .expect("the synthetic extracted tree should create");
     fs::write(&target_file, target_body).expect("the synthetic target file should write");
     mlx_c_directory
 }
@@ -127,6 +134,69 @@ fn should_fail_loudly_when_the_find_text_occurs_more_than_once() {
     assert!(
         apply_outcome.is_none(),
         "an ambiguous target must fail the build loudly instead of editing one arbitrary site"
+    );
+    let _ = fs::remove_dir_all(&mlx_c_directory);
+}
+
+#[test]
+fn should_handle_edits_whose_replacement_does_not_contain_the_find_text() {
+    // A second shape exists in the set: edits whose replacement interrupts
+    // the find text, so an applied tree shows find ZERO times rather than
+    // nested inside the replacement. The real CMakeLists edit carries this
+    // shape; a synthetic set drives the same counting rule through apply,
+    // skip, and drift.
+    use native_forward_edits::{ForwardSourceEdit, apply_edit_set};
+    let synthetic_edit = ForwardSourceEdit {
+        path: "synthetic/CMakeLists.txt",
+        find: "if(SYSTEM_MODE)\n  find_package(SYSTEM REQUIRED)",
+        replacement: "if(SYSTEM_MODE)\n  # injected dependency resolution\n  \
+                      find_package(dep REQUIRED)\n  find_package(SYSTEM REQUIRED)",
+        drop_with: "nothing; this edit exists only in tests",
+    };
+    let synthetic_set = [synthetic_edit];
+    let mlx_c_directory = std::env::temp_dir().join(format!(
+        "mlx-c-rust-forward-edit-shape-test-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("the system clock should be past the Unix epoch")
+            .as_nanos()
+    ));
+    let target_file = mlx_c_directory.join(synthetic_set[0].path);
+    fs::create_dir_all(target_file.parent().expect("the path names directories"))
+        .expect("the synthetic tree should create");
+
+    // Fresh tree: applies exactly once.
+    fs::write(&target_file, format!("{}\n", synthetic_set[0].find))
+        .expect("the fresh target should write");
+    assert!(
+        apply_edit_set(&synthetic_set, &mlx_c_directory).is_some(),
+        "a fresh tree carrying the exact find text must edit cleanly"
+    );
+    assert_eq!(
+        fs::read_to_string(&target_file).expect("the edited file should read"),
+        format!("{}\n", synthetic_set[0].replacement),
+        "the non-containing shape must apply the full replacement"
+    );
+
+    // Applied tree: replacement once, find absent — the state that
+    // previously misclassified as drift — must skip byte-identically.
+    assert!(
+        apply_edit_set(&synthetic_set, &mlx_c_directory).is_some(),
+        "a retry over the applied non-containing form must succeed"
+    );
+    assert_eq!(
+        fs::read_to_string(&target_file).expect("the file should still read"),
+        format!("{}\n", synthetic_set[0].replacement),
+        "the idempotent skip must leave the file byte-identical"
+    );
+
+    // Drifted tree: neither form present — loud failure.
+    fs::write(&target_file, "upstream rewrote the block entirely\n")
+        .expect("the drifted target should write");
+    assert!(
+        apply_edit_set(&synthetic_set, &mlx_c_directory).is_none(),
+        "a drifted target must fail the build loudly"
     );
     let _ = fs::remove_dir_all(&mlx_c_directory);
 }

@@ -37,15 +37,22 @@ pub const PINNED_MLX_C_TARBALL_SHA256: &str =
 const PINNED_TARBALL_BASE_URL: &str = "https://github.com";
 
 /// Version of the build recipe itself, folded into the prefix identity.
-/// Recipe 3 is the first to carry the forward edit set (see below) and to
-/// compile MLX-C against THIS engine's pinned MLX through MLX_C_USE_SYSTEM_
-/// MLX; recipe 2 added system-MLX linkage; recipe 1 left the option unset,
-/// so MLX-C's CMake took its FetchContent fallback — cloning an older MLX
-/// and compiling it a second time inside the MLX-C build tree, doubling
-/// every cold journey and version-skewing the pair. Bump this when the
-/// recipe's build semantics change, so machines holding a prefix built the
-/// old way orphan it exactly like a pin bump would.
-const PINNED_PAIR_BUILD_RECIPE: &str = "recipe-3-forward-edits";
+/// Recipe 5 bakes the Metal kernel library's path INTO the prefix
+/// (-DMLX_METAL_PATH=<prefix>/lib): recipe 4's static build left MLX's
+/// default — the build-tree kernels directory — baked instead, so consumer
+/// machines had to keep the entire build tree alive or every binary died
+/// at startup while builds stayed green. Recipe 4 built the pair
+/// statically for the automatic path (binaries embed the pair instead of
+/// loading `@rpath` dylibs they cannot resolve). Recipe 3 carried the
+/// forward edit set and compiled MLX-C against this engine's pinned MLX
+/// through MLX_C_USE_SYSTEM_MLX; recipe 2 added system-MLX linkage;
+/// recipe 1 left the option unset, so MLX-C's CMake took its FetchContent
+/// fallback — cloning an older MLX and compiling it a second time inside
+/// the MLX-C build tree, doubling every cold journey and version-skewing
+/// the pair. Bump this when the recipe's build semantics change, so
+/// machines holding a prefix built the old way orphan it exactly like a
+/// pin bump would.
+const PINNED_PAIR_BUILD_RECIPE: &str = "recipe-5-prefix-metallib";
 
 /// The forward edit set this engine applies to the extracted MLX-C tree
 /// between extraction and configure. It lives in its own self-contained,
@@ -278,6 +285,16 @@ pub fn ensure_pinned_pair() -> NativeBuildOutcome {
     forward_edit_operation.complete("ok");
 
     let parallelism = std::env::var("NUM_JOBS").unwrap_or_else(|_| "4".to_owned());
+    // The kernel build writes mlx.metallib directly into the prefix
+    // (MLX_METAL_PATH), so the install directory must exist at build time,
+    // not only after cmake --install creates it.
+    if let Err(create_error) = std::fs::create_dir_all(prefix.join("lib")) {
+        println!(
+            "cargo:warning=could not create the prefix library directory {}: {create_error}",
+            prefix.join("lib").display()
+        );
+        return NativeBuildOutcome::Failed;
+    }
     let mlx_build = working_directory.join("mlx-build");
     let mlx_marker = marker_directory.join("mlx");
     if !mlx_marker.exists() {
@@ -290,7 +307,18 @@ pub fn ensure_pinned_pair() -> NativeBuildOutcome {
                 .arg("-B")
                 .arg(&mlx_build)
                 .arg("-DCMAKE_BUILD_TYPE=Release")
-                .arg("-DBUILD_SHARED_LIBS=ON")
+                // The kernel library's baked path must live INSIDE the
+                // prefix: MLX compiles METAL_PATH from this variable into
+                // the binary, and with the build-tree default a consumer
+                // machine must keep the entire (hundreds of megabytes)
+                // build tree alive or every binary dies at startup — the
+                // build-succeeds/load-dies class of defect this engine
+                // exists to prevent.
+                .arg(format!("-DMLX_METAL_PATH={}", prefix.join("lib").display()))
+                // Static: downstream binaries embed the pair instead of
+                // loading @rpath dylibs they cannot resolve (a library
+                // crate cannot inject an rpath into consumers' binaries).
+                .arg("-DBUILD_SHARED_LIBS=OFF")
                 .arg("-DMLX_METAL_JIT=ON")
                 .arg(format!("-DCMAKE_INSTALL_PREFIX={}", prefix.display())),
         );
@@ -341,6 +369,37 @@ pub fn ensure_pinned_pair() -> NativeBuildOutcome {
         let _ = std::fs::write(&mlx_marker, b"complete");
     }
 
+    // MLX's install ships jaccl's imported targets without the package
+    // config find_package(jaccl) needs — upstream consumes jaccl internally
+    // and never expected it found as a package, which surfaces exactly when
+    // a consumer (the MLX-C build, through the forward edit set) takes the
+    // system-MLX path. The engine completes the packaging with the standard
+    // minimal config; idempotent, and it stands down the day an MLX install
+    // ships its own.
+    let jaccl_config_directory = prefix.join("lib/cmake/jaccl");
+    if jaccl_config_directory.join("jacclTargets.cmake").is_file()
+        && !jaccl_config_directory.join("jacclConfig.cmake").is_file()
+        && let Err(config_write_error) = std::fs::write(
+            jaccl_config_directory.join("jacclConfig.cmake"),
+            "# Generated by the mlx-c-rust native build engine: MLX's install\n\
+             # ships jaccl's targets without the package config that\n\
+             # find_package(jaccl) searches for. Completing the packaging.\n\
+             if(NOT TARGET jaccl::jaccl)\n\
+               include(\"${CMAKE_CURRENT_LIST_DIR}/jacclTargets.cmake\")\n\
+             endif()\n",
+        )
+    {
+        // Loud, per the poisoned-cache precedent: a silent failure here
+        // would surface later as a bare find_package(jaccl) error naming
+        // nothing about the real cause.
+        println!(
+            "cargo:warning=could not write the generated jaccl package config at {}: \
+             {config_write_error}; the MLX-C configure will fail to find jaccl",
+            jaccl_config_directory.join("jacclConfig.cmake").display()
+        );
+        return NativeBuildOutcome::Failed;
+    }
+
     let mlx_c_build = working_directory.join("mlx-c-build");
     let mlx_c_marker = marker_directory.join("mlx-c");
     if !mlx_c_marker.exists() {
@@ -353,8 +412,11 @@ pub fn ensure_pinned_pair() -> NativeBuildOutcome {
                 .arg("-B")
                 .arg(&mlx_c_build)
                 .arg("-DCMAKE_BUILD_TYPE=Release")
-                .arg("-DBUILD_SHARED_LIBS=ON")
-                .arg("-DMLX_BUILD_EXAMPLES=OFF")
+                // Static: downstream binaries embed the pair instead of
+                // loading @rpath dylibs they cannot resolve (a library
+                // crate cannot inject an rpath into consumers' binaries).
+                .arg("-DBUILD_SHARED_LIBS=OFF")
+                .arg("-DMLX_C_BUILD_EXAMPLES=OFF")
                 // THE switch that makes MLX-C compile against this engine's
                 // pinned MLX. MLX-C's CMake chooses between find_package(MLX)
                 // and a FetchContent fallback through MLX_C_USE_SYSTEM_MLX —
