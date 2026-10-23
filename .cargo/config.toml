@@ -52,7 +52,10 @@ warnings = "deny"
 # once per machine with `cargo xtask build-native`. Tests run SERIALIZED —
 # `cargo test -- --test-threads=1` — because MLX's default stream, default
 # device, and the installed error handler are process-global state; the
-# `native-test` alias below carries that flag for you.
+# `native-test` alias below carries that flag for you. One mode change to
+# know about: depending with default-features = false removes the link
+# ladder entirely (bindings-only — the consumer owns the linker), so
+# nothing above applies to that mode.
 
 [alias]
 # Repository tooling runs as typed Rust through the xtask pattern. The
