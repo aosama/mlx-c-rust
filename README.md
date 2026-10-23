@@ -2,7 +2,7 @@
 
 A complete, low-level, policy-free Rust bridge to the public [MLX-C](https://github.com/ml-explore/mlx-c) C API of Apple's [MLX](https://github.com/ml-explore/mlx) array framework for Apple silicon.
 
-**Current release binds MLX-C `v0.7.0` / MLX `v0.32.x`.**
+**Current release: `0.32.3-alpha.1` — verified against MLX `v0.32.3`, binding the complete MLX-C `v0.7.0` surface.** The crate version always names the MLX release it is verified against — the number you search for and install — while the bound MLX-C release is recorded here and in `COVERAGE_INVENTORY.md`.
 
 ## The goal
 
@@ -35,7 +35,7 @@ If neither is found the crate still checks and compiles (documentation builds wo
 
 ## Versioning
 
-The crate version mirrors the MLX-C release it binds: MLX-C `0.7.x` → crate `0.7.x`. Both sides are pre-1.0, so minor releases may carry breaking changes when upstream does.
+The crate version names the **MLX release it is verified against** (the scheme mlx-rs established for user-facing crates): crate `0.32.3.x` is verified against MLX `v0.32.3`. The bound MLX-C release rides in the README headline and `COVERAGE_INVENTORY.md`. Both upstreams are pre-1.0, so minor releases may carry breaking changes when upstream does; our own fixes and same-MLX MLX-C surface changes ride as patch bumps.
 
 ## Attribution
 
