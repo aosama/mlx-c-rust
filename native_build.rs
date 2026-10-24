@@ -37,7 +37,14 @@ pub const PINNED_MLX_C_TARBALL_SHA256: &str =
 const PINNED_TARBALL_BASE_URL: &str = "https://github.com";
 
 /// Version of the build recipe itself, folded into the prefix identity.
-/// Recipe 5 bakes the Metal kernel library's path INTO the prefix
+/// Recipe 6 adds the gap shim as the third compiled component: the
+/// repository's own mlxrs_* C ABI over the pinned MLX C++ surface for the
+/// functions the vendored MLX-C pin has not wrapped, so an MLX capability
+/// is reachable from Rust the day the pin moves instead of the day MLX-C
+/// catches up. The shim's sources live in the repository
+/// (native_gap_shim/); a shim source change rides a recipe bump, exactly
+/// as a forward-edit change does. Recipe 5 bakes the Metal kernel
+/// library's path INTO the prefix
 /// (-DMLX_METAL_PATH=<prefix>/lib): recipe 4's static build left MLX's
 /// default — the build-tree kernels directory — baked instead, so consumer
 /// machines had to keep the entire build tree alive or every binary died
@@ -52,7 +59,7 @@ const PINNED_TARBALL_BASE_URL: &str = "https://github.com";
 /// the pair. Bump this when the recipe's build semantics change, so
 /// machines holding a prefix built the old way orphan it exactly like a
 /// pin bump would.
-const PINNED_PAIR_BUILD_RECIPE: &str = "recipe-5-prefix-metallib";
+const PINNED_PAIR_BUILD_RECIPE: &str = "recipe-6-gap-shim";
 
 /// The forward edit set this engine applies to the extracted MLX-C tree
 /// between extraction and configure. It lives in its own self-contained,
@@ -60,6 +67,9 @@ const PINNED_PAIR_BUILD_RECIPE: &str = "recipe-5-prefix-metallib";
 /// engine along.
 #[path = "native_forward_edits.rs"]
 mod native_forward_edits;
+
+#[path = "native_gap_shim_build.rs"]
+mod native_gap_shim_build;
 
 use native_forward_edits::apply_forward_source_edits;
 
@@ -124,6 +134,25 @@ pub fn prefix_carries_mlxc_library(prefix: &Path) -> bool {
         || library_directory.join("libmlxc.a").is_file()
 }
 
+/// Reports whether `prefix/lib` holds the gap shim library. The shim is
+/// this repository's own component, so a prefix is only complete when it
+/// carries all three libraries.
+pub fn prefix_carries_gap_shim_library(prefix: &Path) -> bool {
+    prefix.join("lib").join("libmlxrs_gap_shim.a").is_file()
+}
+
+/// The repository's gap-shim source directory. This module is included by
+/// both the crate's build script (whose manifest directory IS the
+/// repository root) and the xtask package (one level below), so the
+/// directory is found by walking up from the compiled-in location until
+/// the shim directory appears — no signature changes, no call sites.
+fn gap_shim_source_directory() -> Option<PathBuf> {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .map(|ancestor| ancestor.join("native_gap_shim"))
+        .find(|candidate| candidate.join("src").join("gap_shim.cpp").is_file())
+}
+
 /// One outcome of a build attempt, rendered for callers that must decide
 /// between proceeding with the prefix or warning and continuing without.
 pub enum NativeBuildOutcome {
@@ -170,9 +199,11 @@ pub fn ensure_pinned_pair() -> NativeBuildOutcome {
         );
         return NativeBuildOutcome::Failed;
     };
-    if prefix_carries_mlxc_library(&prefix) {
+    if prefix_carries_mlxc_library(&prefix) && prefix_carries_gap_shim_library(&prefix) {
         // The warm path most builds take: report the reuse so callers see
-        // why this engine returned in milliseconds.
+        // why this engine returned in milliseconds. The gap shim counts:
+        // an old prefix from before the shim existed is NOT complete, and
+        // the build below resumes from its phase markers.
         emit(
             progress_file_path.as_deref(),
             &format!(
@@ -473,7 +504,34 @@ pub fn ensure_pinned_pair() -> NativeBuildOutcome {
         let _ = std::fs::write(&mlx_c_marker, b"complete");
     }
 
-    if prefix_carries_mlxc_library(&prefix) {
+    // The gap shim: the repository's own mlxrs_* C ABI, compiled from the
+    // repository sources against the just-installed pair as the third
+    // prefix component (the phase lives in its own module).
+    let Some(gap_shim_source) = gap_shim_source_directory() else {
+        println!(
+            "cargo:warning=the gap shim sources were not found by walking up from \
+             the build engine's location; the native build cannot complete"
+        );
+        emit(
+            progress_file_path.as_deref(),
+            "status=failed reason=missing-shim-source",
+        );
+        return NativeBuildOutcome::Failed;
+    };
+    if native_gap_shim_build::build_gap_shim(
+        progress_file_path.as_deref(),
+        &working_directory,
+        &marker_directory,
+        &prefix,
+        &parallelism,
+        &gap_shim_source,
+    )
+    .is_none()
+    {
+        return NativeBuildOutcome::Failed;
+    }
+
+    if prefix_carries_mlxc_library(&prefix) && prefix_carries_gap_shim_library(&prefix) {
         emit(
             progress_file_path.as_deref(),
             &format!(

@@ -82,6 +82,23 @@ pub fn run() -> ExitCode {
         started_at.elapsed().as_secs_f64()
     );
 
+    // The audit's record legs run offline from repository files alone, so
+    // they belong in the local gate exactly like the ceiling: a drifted
+    // COVERAGE_INVENTORY.md or shim header must fail before the push. The
+    // upstream leg needs an MLX checkout and stays opt-in through
+    // --mlx-source.
+    let audit_arguments: Vec<String> = Vec::new();
+    if super::audit_upstream_surface::run(&audit_arguments) == ExitCode::FAILURE {
+        eprintln!(
+            "[verify] lane=inventory-records status=fail hint=refresh COVERAGE_INVENTORY.md or the shim record above, then verify again"
+        );
+        return ExitCode::FAILURE;
+    }
+    println!(
+        "[verify] lane=inventory-records status=pass elapsed_seconds={:.1}",
+        started_at.elapsed().as_secs_f64()
+    );
+
     for verification_lane in &VERIFICATION_LANES {
         let lane_started_at = std::time::Instant::now();
         let lane_status = Command::new(cargo_executable_path())

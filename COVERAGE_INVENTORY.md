@@ -10,10 +10,11 @@ MLX-C v0.7.0, carried forward by the reviewed edit set in
 pairs with that MLX. The forward edits are C++-side only — the C surface
 recorded below is exactly the vendored MLX-C v0.7.0 surface.
 
-- Public upstream functions: 669
+- Public upstream functions: 668
 - Public upstream types: 84
-- Bridged functions: 670
+- Bridged functions: 669
 - Bridged types: 84
+- Gap shim functions: 4
 - Exclusions: 1
 
 ## Functions
@@ -60,7 +61,6 @@ recorded below is exactly the vendored MLX-C v0.7.0 surface.
 | `mlx_array_data_uint32` | bridged |
 | `mlx_array_data_uint64` | bridged |
 | `mlx_array_data_uint8` | bridged |
-| `mlx_array_detach` | bridged |
 | `mlx_array_dim` | bridged |
 | `mlx_array_dtype` | bridged |
 | `mlx_array_equal` | bridged |
@@ -778,6 +778,22 @@ recorded below is exactly the vendored MLX-C v0.7.0 surface.
 | `mlx_vector_string_` | bridged |
 | `mlx_vector_vector_array` | bridged |
 | `mlx_vector_vector_array_` | bridged |
+
+## Gap shim functions
+
+The repository's own `mlxrs_*` C ABI (sources in `native_gap_shim/`,
+compiled by the native build engine as the third prefix component) for
+MLX functions the vendored MLX-C pin has not wrapped. Entries retire when
+an MLX-C release wraps their function; `cargo xtask
+audit-upstream-surface` flags both missing wrappers and entries whose
+MLX-C equivalent has arrived.
+
+| shim symbol | wraps |
+|---|---|
+| `mlxrs_matrix_transpose` | MLX core `matrix_transpose` |
+| `mlxrs_minmax_axes` | MLX core `minmax`, the axes overload |
+| `mlxrs_minmax_axis` | MLX core `minmax`, the axis overload |
+| `mlxrs_unique` | MLX core `unique` |
 
 ## Exclusion registry
 
