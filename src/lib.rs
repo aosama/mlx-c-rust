@@ -8,7 +8,11 @@
 //! wrapper family: creation, shape, padding, elementwise math, activation,
 //! normalization, convolution, random, rope, quantized operations,
 //! quantization construction, NVFP4, attention, the compiled-graph family,
-//! the Metal kernels and capture, and the general operation set. It contains
+//! the Metal kernels and capture, the general operation set, and the gap
+//! shim family — this repository's own `mlxrs_*` C ABI (compiled from
+//! `native_gap_shim/` by the native build engine) for MLX functions the
+//! vendored MLX-C pin has not wrapped yet, so an MLX capability is
+//! reachable the day the pin moves. It contains
 //! no embedding policy: memory limits, the metallib path selection and
 //! verification, safetensors vtable policies, and process I/O accounting
 //! belong to the embedding application, which links this crate against an

@@ -26,3 +26,4 @@ pub(crate) mod random_sampling;
 pub(crate) mod reduction;
 pub(crate) mod rope;
 pub(crate) mod shape;
+pub(crate) mod upstream_gap;

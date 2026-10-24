@@ -34,6 +34,8 @@ fn should_keep_pinned_pair_identity_stable() {
     // breaks this string orphans every machine's compiled native pair —
     // updating it must therefore always be a conscious act that rides a
     // deliberate pin or recipe bump, never an accident of refactoring or a
-    // dependency upgrade changing how digests render.
-    assert_eq!(pinned_pair_identity(), "1f41da67bbf3ea74");
+    // dependency upgrade changing how digests render. The current golden
+    // value is recipe-6-gap-shim: the recipe that added the gap shim as
+    // the third compiled prefix component.
+    assert_eq!(pinned_pair_identity(), "53e741f2d8752140");
 }

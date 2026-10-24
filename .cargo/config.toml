@@ -68,7 +68,12 @@ warnings = "deny"
 # MLX and MLX-C pair into the machine-shared identity-keyed prefix under
 # ~/.cache/mlx-c-rust/native/<identity>/prefix — the same prefix the
 # crate's build script reads — so the pair compiles once per machine per
-# pin and every consumer reuses it; `cargo xtask source-size [--staged]`
+# pin and every consumer reuses it; `cargo xtask
+# audit-upstream-surface [--mlx-source <mlx checkout>]` proves no MLX
+# public function lacks a C wrapper in the vendored MLX-C tree (the only
+# layer where coverage can be lost upstream of the mechanical bindgen
+# translation) and that COVERAGE_INVENTORY.md's function record matches
+# the vendored headers; `cargo xtask source-size [--staged]`
 # enforces the AGENTS.md per-file line ceiling; `cargo xtask verify` runs
 # the continuous-integration lint lane locally (what the pre-push hook
 # gates on); `cargo xtask prune-caches` keeps GitHub Actions cache

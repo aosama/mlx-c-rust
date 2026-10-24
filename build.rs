@@ -35,6 +35,12 @@ const MLX_C_PREFIX_VARIABLE: &str = "MLX_C_RUST_MLX_C_PREFIX";
 
 const BINDGEN_FUNCTION_ALLOWLIST: &str = "mlx_.*";
 const BINDGEN_TYPE_ALLOWLIST: &str = "mlx_.*";
+// The gap shim's own symbols: this repository's mlxrs_* C ABI for MLX
+// functions the vendored MLX-C pin has not wrapped. They join the SAME
+// bindgen parse (one combined umbrella) so shim declarations share the
+// single type universe with the MLX-C declarations they build on.
+const GAP_SHIM_FUNCTION_ALLOWLIST: &str = "mlxrs_.*";
+const GAP_SHIM_TYPE_ALLOWLIST: &str = "mlxrs_.*";
 
 /// The generated inventory module consumed by `raw.rs`; it exposes the exact
 /// bridged symbol sets the coverage contract compares against the vendored
@@ -97,6 +103,22 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     println!("cargo:rerun-if-changed={}", include_directory.display());
+    // The gap shim: header joined into the combined parse below, sources
+    // compiled by the native engine, so both belong to the rebuild face.
+    let gap_shim_include_directory = manifest_directory.join("native_gap_shim/include");
+    let gap_shim_header = gap_shim_include_directory.join("mlxrs/gap_shim.h");
+    if !gap_shim_header.is_file() {
+        return Err(format!("missing gap shim header at {}", gap_shim_header.display()).into());
+    }
+    println!(
+        "cargo:rerun-if-changed={}",
+        manifest_directory.join("native_gap_shim").display()
+    );
+    let combined_umbrella_header = output_directory.join("combined_umbrella.h");
+    std::fs::write(
+        &combined_umbrella_header,
+        "#include \"mlx/c/mlx.h\"\n#include \"mlxrs/gap_shim.h\"\n",
+    )?;
     // The prefix variable only steers the link ladder; bindings-only
     // consumers (no `link` feature) never read it, so their builds do not
     // rebuild when it moves.
@@ -105,11 +127,18 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let bindings = bindgen::Builder::default()
-        .header(mlx_c_header.to_string_lossy())
+        // One combined umbrella: the vendored MLX-C tree plus the gap
+        // shim's header, parsed together so the mlxrs_* declarations bind
+        // against the same mlx_array/mlx_stream types the shim's C header
+        // includes from mlx/c/mlx.h.
+        .header(combined_umbrella_header.to_string_lossy())
         .clang_arg(format!("-I{}", include_directory.display()))
+        .clang_arg(format!("-I{}", gap_shim_include_directory.display()))
         .clang_args(self_contained_parse_arguments(&freestanding_directory))
         .allowlist_function(BINDGEN_FUNCTION_ALLOWLIST)
         .allowlist_type(BINDGEN_TYPE_ALLOWLIST)
+        .allowlist_function(GAP_SHIM_FUNCTION_ALLOWLIST)
+        .allowlist_type(GAP_SHIM_TYPE_ALLOWLIST)
         .generate_comments(false)
         .generate()?;
     let bindings_content = bindings.to_string();
@@ -263,6 +292,14 @@ fn emit_prefix_link_flags(prefix: &Path) {
             library_directory.display()
         );
     } else {
+        // The gap shim precedes the pair: it references mlxc and mlx
+        // symbols, and the linker resolves archives left to right. Only
+        // the engine's prefix carries the shim; a consumer-supplied
+        // prefix omits it and the mlxrs_* wrappers stay unlinked unless
+        // the consumer compiles the self-contained shim themselves.
+        if native_build::prefix_carries_gap_shim_library(prefix) {
+            println!("cargo:rustc-link-lib=static=mlxrs_gap_shim");
+        }
         println!("cargo:rustc-link-lib=static=mlxc");
         println!("cargo:rustc-link-lib=static=mlx");
         println!("cargo:rustc-link-lib=static=jaccl");
@@ -273,10 +310,11 @@ fn emit_prefix_link_flags(prefix: &Path) {
     }
 }
 
-/// Extracts the bridged `mlx_*` functions and types from the generated
-/// bindings and emits them as public constant slices so the coverage contract
-/// can compare the bridge against the vendored headers without re-running
-/// bindgen.
+/// Extracts the bridged `mlx_*` functions and types plus the bridged
+/// `mlxrs_*` gap-shim functions from the generated bindings and emits
+/// them as public constant slices so the coverage contract can compare
+/// the bridge against the vendored headers and the shim header without
+/// re-running bindgen.
 fn write_bridged_inventory(
     bindings_content: &str,
     output_directory: &Path,
@@ -327,6 +365,20 @@ fn write_bridged_inventory(
     bridged_types.sort();
     bridged_types.dedup();
 
+    // The gap shim's bridged functions, kept as their own slice: shim
+    // symbols are this repository's surface, not the vendored MLX-C
+    // surface, and the audit and inventory contract track the two
+    // separately so shim entries can retire the day MLX-C catches up.
+    let mut gap_shim_bridged_functions: Vec<String> = bindings_content
+        .split("pub fn ")
+        .skip(1)
+        .map(|segment| &segment[..identifier_end(segment)])
+        .filter(|name| name.starts_with("mlxrs_"))
+        .map(str::to_owned)
+        .collect();
+    gap_shim_bridged_functions.sort();
+    gap_shim_bridged_functions.dedup();
+
     let inventory_source = format!(
         "// Generated by this crate's build script from the bindgen output.\n\
          // Every listed symbol exists in the compiled bridge; the coverage\n\
@@ -334,11 +386,17 @@ fn write_bridged_inventory(
          /// Every MLX-C function bridged by the generated raw declarations.\n\
          pub const BRIDGED_FUNCTIONS: [&str; {}] = {:?};\n\n\
          /// Every MLX-C type bridged by the generated raw declarations.\n\
-         pub const BRIDGED_TYPES: [&str; {}] = {:?};\n",
+         pub const BRIDGED_TYPES: [&str; {}] = {:?};\n\n\
+         /// Every gap-shim function bridged by the generated raw\n\
+         /// declarations: this repository's mlxrs_* surface over the MLX\n\
+         /// functions the vendored MLX-C pin has not wrapped.\n\
+         pub const GAP_SHIM_BRIDGED_FUNCTIONS: [&str; {}] = {:?};\n",
         bridged_functions.len(),
         bridged_functions,
         bridged_types.len(),
         bridged_types,
+        gap_shim_bridged_functions.len(),
+        gap_shim_bridged_functions,
     );
     std::fs::write(
         output_directory.join(BRIDGED_INVENTORY_FILE_NAME),

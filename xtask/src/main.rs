@@ -6,10 +6,13 @@
 #[path = "../../native_build.rs"]
 mod native_build;
 
+mod audit_upstream_surface;
 mod cache_prune;
 mod hooks;
+mod inventory_records;
 mod repository;
 mod source_size;
+mod surface_parsing;
 mod verify;
 
 use std::process::ExitCode;
@@ -18,6 +21,9 @@ fn main() -> ExitCode {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     match arguments.first().map(String::as_str) {
         Some("build-native") => build_native(arguments.get(1..).unwrap_or(&[])),
+        Some("audit-upstream-surface") => {
+            audit_upstream_surface::run(arguments.get(1..).unwrap_or(&[]))
+        }
         Some("source-size") => source_size::run(arguments.get(1..).unwrap_or(&[])),
         Some("verify") => verify::run(),
         Some("prune-caches") => cache_prune::run(arguments.get(1..).unwrap_or(&[])),
@@ -31,8 +37,14 @@ fn main() -> ExitCode {
                 "usage: cargo xtask <command>\n\ncommands:\n  \
                  build-native [--force]  Compile the pinned MLX and MLX-C pair into the \
                  machine-shared prefix (reuses an existing build; --force recompiles).\n  \
-                 source-size [--staged] Enforce the per-file line ceiling on owned code \
-                 files (--staged inspects only the index; default scans the repository).\n  \
+                audit-upstream-surface [--mlx-source <path>]\n \
+                \x20                       Audit that no MLX public function lacks a C \
+                wrapper in the vendored MLX-C tree, and that COVERAGE_INVENTORY.md's \
+                function record matches the vendored headers (--mlx-source points at a \
+                checkout of the pinned MLX tag for the upstream leg; the inventory leg \
+                always runs).\n  \
+                source-size [--staged] Enforce the per-file line ceiling on owned code \
+                files (--staged inspects only the index; default scans the repository).\n  \
                  verify                 Run the continuous-integration lint lane locally: \
                  size ceiling, formatting, clippy, documentation.\n  \
                  prune-caches [--dry-run] [--repo owner/name]\n \
